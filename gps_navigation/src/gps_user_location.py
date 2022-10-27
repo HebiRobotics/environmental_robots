@@ -3,13 +3,18 @@ import sys
 import os
 import re
 import csv
-#sys.path.insert(0, "/home/cvx/catkin_ws/src/gps_navigation-main/src")
+
+# add pxrf's plot script to lookup path
+import rospkg
+rospack = rospkg.RosPack()
+work_dir_path = os.path.join(rospack.get_path('gps_navigation'), 'src')
+sys.path.insert(0, work_dir_path)
+
 def read_location():
     print("please ensure that the robot is connected to the wifi")
     data = []
     num = 0
-    #open the locations.cvs file
-    with open('/home/cvx/catkin_ws/src/gps_navigation-main/src/locations.csv', 'r') as csvfile:
+    with open(os.path.join(work_dir_path, 'locations.csv'), 'r') as csvfile:
         reader = csv.reader(csvfile, delimiter = ',')
         for row in reader:
             if row:
@@ -36,7 +41,7 @@ def read_location():
             width = input("enter the width - recommend 10: ")
             height = input("enter the height - recommend 10: ")
             new_location = [filename + "," + lat + "," + lon + "," + zoom + "," + width + "," + height]
-            with open('/home/cvx/catkin_ws/src/gps_navigation-main/src/locations.csv', 'a') as writefile:
+            with open('locations.csv', 'a') as writefile:
                 writer = csv.writer(writefile)
                 writer.writerow([filename, lat, lon, zoom, width, height])
             print("new location added successfully")

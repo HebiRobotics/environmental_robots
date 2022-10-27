@@ -17,9 +17,16 @@ import csv
 from std_msgs.msg import String
 from sensor_msgs.msg import NavSatFix
 from microstrain_inertial_msgs.msg import FilterHeading
-sys.path.insert(0,"/home/cvx/catkin_ws/src/pxrf/scripts")
+
+# add pxrf's plot script to lookup path
+import rospkg
+rospack = rospkg.RosPack()
+pxrf_path = rospack.get_path('pxrf')
+sys.path.insert(0, os.path.abspath(os.path.join(pxrf_path, "scripts")))
+
 from plot import generate_plot
 from gps_user_location import read_location
+
 #testing
 lat_set = 0
 lon_set = 0
@@ -112,13 +119,13 @@ class gps_user_input(object):
         rospy.init_node('gps_user_input',anonymous=True)
         # load map
         try:
-           # lat = rospy.get_param('~lat')
-           # lon = rospy.get_param('~lon')
-           # self.prev_lat = lat
-           # self.prev_lon = lon
-           # height = rospy.get_param('~height')
-           # width = rospy.get_param('~width')
-           # zoom = rospy.get_param('~zoom')
+           lat = float(rospy.get_param('~lat'))
+           lon = float(rospy.get_param('~lon'))
+           self.prev_lat = lat
+           self.prev_lon = lon
+           height = float(rospy.get_param('~height'))
+           width = float(rospy.get_param('~width'))
+           zoom = int(rospy.get_param('~zoom'))
            self.prev_lat = lat_set
            self.prev_lon = lon_set
            height = height_set
@@ -520,7 +527,11 @@ class gps_user_input(object):
         return
 if __name__ == '__main__':
     location_input = read_location()
-    lat_set, lon_set, zoom_set, width_set, height_set = location_input[1:6]
+
+    lat_set, lon_set = [float(n) for n in location_input[1:3]]
+    zoom_set = int(location_input[3])
+    width_set, height_set = [int(n) for n in location_input[4:6]]
+
     print([lat_set, lon_set, zoom_set, width_set, height_set])
     app = QtWidgets.QApplication([])
     mw = QtWidgets.QMainWindow()
