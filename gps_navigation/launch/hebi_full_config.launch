@@ -1,5 +1,10 @@
 <?xml version="1.0"?>
 <launch>
+	<!-- gps driver -->
+	<include file="$(find microstrain_inertial_driver)/launch/microstrain.launch" />
+
+	<!-- vanta pxrf -->
+	<include file="$(find kraton)/launch/pxrf.launch" />
 	
 	<!-- open python gui -->
 	<node pkg="gps_navigation" type="gps_user_input.py" name="gps_user_input" output="screen">

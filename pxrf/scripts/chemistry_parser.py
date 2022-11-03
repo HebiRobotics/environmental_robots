@@ -8,6 +8,14 @@ from pxrf.msg import PxrfMsg
 import sys
 sys.path.insert(0,"/home/cvx/catkin_ws/src/pxrf/scripts")
 from sensor_msgs.msg import NavSatFix
+
+# add pxrf's plot script to lookup path
+import os
+import rospkg
+rospack = rospkg.RosPack()
+pxrf_path = rospack.get_path('pxrf')
+sys.path.insert(0, os.path.abspath(os.path.join(pxrf_path, "scripts")))
+
 from plot import generate_plot
 
 class CHEMISTRY_PARSER:
@@ -28,7 +36,7 @@ class CHEMISTRY_PARSER:
         # Subscriber
         rospy.Subscriber("pxrf_data", PxrfMsg, self.writeData)
         rospy.Subscriber("pxrf_response", String, self.listener)
-        rospy.Subscriber("gps",NavSatFix,self.gps)
+        rospy.Subscriber("gnss1/fix",NavSatFix,self.gps)
         # spin
         rospy.spin()
 
@@ -80,7 +88,7 @@ class CHEMISTRY_PARSER:
                     arr[i] = float(arr[i])
                     error.append(arr[i])
 
-            with open('/home/cvx/catkin_ws/src/pxrf/scripts/chemistry.csv', 'a') as f:
+            with open(os.path.join(pxrf_path, 'scripts','chemistry.csv'), 'a') as f:
                 writer = csv.writer(f)
                 writer.writerow(header)
                 writer.writerow(element)

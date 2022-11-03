@@ -20,7 +20,7 @@ class gps_navigation():
     
     def __init__(self):
         #init parameters needed for waypoint nav
-        rospy.init_node('gps_navigation',anonymous=True)
+        rospy.init_node('gps_navigation', anonymous=True)
         self.X = 0
         self.Y = 0
         self.xdot = 0
@@ -37,9 +37,9 @@ class gps_navigation():
         self.controller = PIDController()
 
         self.goalPos = None # in lon lat degree
-        self.odom_sub = rospy.Subscriber('/nav/odom',Odometry,self.navigate) # do navigation when odom is published
-        self.goal_sub = rospy.Subscriber('/gps_navigation/goal',PoseStamped,self.setGoal) # for setting goal
-        self.cmd_pub = rospy.Publisher('/cmd_vel/managed',Twist,queue_size=5) # for publishing drive commands
+        self.odom_sub = rospy.Subscriber('/nav/odom', Odometry, self.navigate) # do navigation when odom is published
+        self.goal_sub = rospy.Subscriber('/gps_navigation/goal', PoseStamped, self.setGoal) # for setting goal
+        self.cmd_pub = rospy.Publisher('/cmd_vel/managed', Twist, queue_size=5) # for publishing drive commands
         #need a subscriber to find the yaw
         self.goal_pub = rospy.Publisher('/gps_navigation/current_goal',PoseStamped,queue_size=5) # for publishing status of navigation (running/done)
         self.heading_sub = rospy.Subscriber('nav/heading', FilterHeading, self.set_heading)
@@ -93,14 +93,14 @@ class gps_navigation():
             return
 
         # calculate robot position and heading
-        robotPos = np.array([data.pose.pose.position.x,data.pose.pose.position.y])
+        robotPos = np.array([data.pose.pose.position.x, data.pose.pose.position.y])
         #quat = data.pose.pose.orientation
         #r = R.from_quat([quat.x,quat.y,quat.z,quat.w])
         #xVec = r.as_dcm()[:,0]
         #robotHeading = np.mod(atan2(xVec[1],xVec[0])+np.pi/3.0,2*np.pi)
         #self.psi = robotHeading
         # run navigation
-        relGoal = self.goalPos-robotPos
+        relGoal = self.goalPos - robotPos
         print('----Navigating----')
         #print('relative goal: '+ str(relGoal))
         #relGoal[1] = relGoal[1]*np.cos(robotPos[0]*np.pi/180)
@@ -112,10 +112,18 @@ class gps_navigation():
             print('----Finished Navigation----')
         #goalAngle = np.mod(atan2(relGoal[1],relGoal[0]),2*np.pi)
         #print('relative goal angle: %.2f degrees' %(goalAngle*180/np.pi))
-        print('robot heading angle: %.2f degrees' %(self.psi*180/np.pi))
+        print(f'robot heading angle: {self.psi*180/np.pi:.2f} degrees')
         current_time = rospy.get_rostime()
         self.dt = (current_time - self.prev).to_sec()
-        angle, speed = self.controller.update( self.goalPos,self.psi, self.dt, self.X, self.Y, self.xdot, self.ydot, self.psidot, self.vdot)
+        angle, speed = self.controller.update(self.goalPos,
+                                              self.psi,
+                                              self.dt,
+                                              self.X,
+                                              self.Y,
+                                              self.xdot,
+                                              self.ydot,
+                                              self.psidot,
+                                              self.vdot)
         cmd_msg = Twist()
         cmd_msg.linear.x = speed
         cmd_msg.angular.z = angle 

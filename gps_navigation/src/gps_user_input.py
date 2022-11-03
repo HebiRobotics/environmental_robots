@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 import rospy
 import wget
+from urllib.error import HTTPError
 import sys
 import os
 import matplotlib.pyplot as plt
@@ -35,105 +36,117 @@ width_set = 0
 height_set = 0
 #gps_fidelity = 1.0
 
-
-
 def deg2num(lat_deg, lon_deg, zoom):
     lat_rad = math.radians(lat_deg)
     n = 2.0 ** zoom
-    xtile = ((lon_deg + 180.0) / 360.0 * n)
-    ytile = ((1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n)
+    xtile = (lon_deg + 180.0) / 360.0 * n
+    ytile = (1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n
     return (xtile, ytile)
 
-def num2deg(xtile, ytile, zoom):
+def num2deg(xtile, ytile, zoom: int):
     n = 2.0 ** zoom
     lon_deg = xtile / n * 360.0 - 180.0
     lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * ytile / n)))
     lat_deg = math.degrees(lat_rad)
     return (lat_deg, lon_deg)
 
-class satelliteImage(object):
-    def __init__(self,coord=(0,0),dim=(0,0),zoom=0,loadFile=None):
-        if loadFile is None:
-            print("downloading satellite images")
-            self.downloadAllTiles(coord,dim,zoom)
-    def downloadAllTiles(self,coord,dim,zoom):
-        x,y = deg2num(coord[0],coord[1],zoom)
-        xs = np.arange(-dim[0],dim[0]+1) + round(x)
-        ys = np.arange(-dim[1],dim[1]+1) + round(y)
+class TileMap:
+    TILE_SIZE_PX = 512
+
+    def __init__(self, coord=(0,0), dim=(0,0), zoom=0):
+        self.load_tiles(coord, dim, zoom)
+
+    def load_tiles(self, coord, dim, zoom: int):
+        lon = coord[0]
+        lat = coord[1]
+        width = dim[0]
+        height = dim[1] 
+        print(f'Window at Lon: {lon}, Lat: {lat}, W: {width}, H: {height}')
+
+        x, y = deg2num(lon, lat, zoom)
+        x = int(x)
+        y = int(y)
+        print(f'Tile X,Y: {x}, {y}')
+
+        x_start = x - width
+        x_end = x + width + 1
+        y_start = y - height
+        y_end = y + height + 1
+
+        print(f'X from {x_start} to {x_end}')
+        print(f'Y from {y_start} to {y_end}')
+
+        #xs = np.arange(-width, width+1) + x
+        #ys = np.arange(-height, height+1) + y
+
         completeTile = None
-        for i in range(len(xs)):
+        #for i in range(len(xs)):
+        for i in range(x_start, x_end):
             verticalTile = None
-            for j in range(len(ys)):
-                tile = self.getMapTile(zoom,xs[i],ys[j])
-                verticalTile = tile if verticalTile is None else np.concatenate((verticalTile,tile),axis=0)
-            completeTile = verticalTile if completeTile is None else np.concatenate((completeTile,verticalTile),axis=1)
+            #for j in range(len(ys)):
+            for j in range(y_start, y_end):
+                tile = self.getMapTile(zoom, int(i), int(j))
+                verticalTile = tile if verticalTile is None else np.concatenate((verticalTile, tile), axis=0)
+            completeTile = verticalTile if completeTile is None else np.concatenate((completeTile, verticalTile), axis=1)
+
         print('\r')
-        self.tile = completeTile
-        self.x = xs[0]
-        self.y = ys[0]
+        self.map_array = completeTile
+        self.x = x_start
+        self.y = y_start
         self.zoom = zoom
-    def pixel2Coord(self,pix):
-        x = pix[0]/512.0 + self.x
-        y = pix[1]/512.0 + self.y
-        return num2deg(x,y,self.zoom)
-    def coord2Pixel(self,coord):
-        x,y = deg2num(coord[0],coord[1],self.zoom)
-        x = round(512.0*(x-self.x))
-        y = round(512.0*(y-self.y))
-        return x,y
+
+    def pixel2Coord(self, pix):
+        x = float(pix[0]) / self.TILE_SIZE_PX + self.x
+        y = float(pix[1]) / self.TILE_SIZE_PX + self.y
+        return num2deg(x, y, self.zoom)
+
+    def coord2Pixel(self, coord):
+        x,y = deg2num(coord[0], coord[1], self.zoom)
+        x = round(self.TILE_SIZE_PX * (x-self.x))
+        y = round(self.TILE_SIZE_PX * (y-self.y))
+        return x, y
         
-    def getMapTile(self,z,x,y):
-        baseMapLink = "https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/512/%s/%s/%s?access_token=pk.eyJ1Ijoic2Vhbmp3YW5nIiwiYSI6ImNrb2c3d2M5bjBhcHcyb2xsd2VyNXdkNnEifQ.5uaSXmSX1HdSAlEf4LReNg"
-        mapLink = baseMapLink%(z,x,y)
-        mapDirectory = 'gps_navigation_satellite_tiles'
+    def getMapTile(self, zoom: int, x: int, y: int):
+        mapDirectory = os.path.join(
+            os.path.abspath(os.path.dirname(__file__)),
+            'gps_navigation_satellite_tiles')
+
         if not os.path.isdir(mapDirectory):
             os.mkdir(mapDirectory)
-        mapFile = os.path.join(mapDirectory,'satellite_%d_%d_%d'%(x,y,z))
+
+        mapFile = os.path.join(mapDirectory, f'satellite_{zoom}_{x}_{y}.jpeg')
+
         if not os.path.isfile(mapFile):
-            wget.download(mapLink,out=mapFile)
+            print(f"\rDownloading missing map tile x:{x} y:{y} zoom:{zoom}", end='')
+            access_token = "pk.eyJ1Ijoic2Vhbmp3YW5nIiwiYSI6ImNrb2c3d2M5bjBhcHcyb2xsd2VyNXdkNnEifQ.5uaSXmSX1HdSAlEf4LReNg"
+            mapLink = f"https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/512/{zoom}/{x}/{y}?access_token={access_token}"
+
+            try:
+                wget.download(mapLink, out=mapFile)
+            except HTTPError:
+                print(f'Bad Url: {mapLink}')
         tile = np.asarray(mpimg.imread(mapFile))
         return tile
 
-class plotWithClick(pg.PlotItem):
-    def mouseClickEvent(self,ev):
+
+class PlotWithClick(pg.PlotItem):
+    def mouseClickEvent(self, ev):
         xClick = self.getViewBox().mapSceneToView(ev.scenePos()).x()
         yClick = self.getViewBox().mapSceneToView(ev.scenePos()).y()
-        self.addROIPoint([xClick,yClick])
+        self.addROIPoint([xClick, yClick])
+
 
 class PolyLineROI_noHover(pg.PolyLineROI):
-    def hoverEvent(self,ev):
+    def hoverEvent(self, ev):
         pass
 
-class gps_user_input(object):
-    def __init__(self):
+
+class GpsNavigationGui:
+    def __init__(self, lat, lon, zoom, width, height):
         self.prev_lat = 0
         self.prev_lon = 0
         self.prev_heading = 0
-        def prevGoal():
-            self.changeGoal(changeDir=-1)
-        def nextGoal():
-            self.changeGoal(changeDir=1)
-        def clearHistory():
-            self.setHistory(clear = True)
 
-        rospy.init_node('gps_user_input',anonymous=True)
-        # load map
-        try:
-           lat = float(rospy.get_param('~lat'))
-           lon = float(rospy.get_param('~lon'))
-           self.prev_lat = lat
-           self.prev_lon = lon
-           height = float(rospy.get_param('~height'))
-           width = float(rospy.get_param('~width'))
-           zoom = int(rospy.get_param('~zoom'))
-           self.prev_lat = lat_set
-           self.prev_lon = lon_set
-           height = height_set
-           width = width_set
-           zoom = zoom_set
-        except:
-            print("we can't load that location")
-            QtWidgets.QApplication.instance().exec_()    
         #pxrf control
         self.pxrfRunning = False
         
@@ -141,43 +154,76 @@ class gps_user_input(object):
         self.highSpeed = True
 
         #get the map
-        self.satMap = satelliteImage(coord=(lat,lon),dim=(width,height),zoom=zoom)
+        self.satMap = TileMap(coord=(lat,lon), dim=(width,height), zoom=zoom)
+
         # init widget
+        pg.setConfigOption('imageAxisOrder', 'row-major')
         self.widget = pg.LayoutWidget()
+
         # add plot for map
         satGUI = pg.GraphicsLayoutWidget()
         self.widget.addWidget(satGUI,row=0,col=0,colspan=8)
         satGUI.setBackground('w')
-        self.p = plotWithClick()
-        satGUI.addItem(self.p)
+        self.click_plot = PlotWithClick()
+        satGUI.addItem(self.click_plot)
+
         # show satellite image
-        pg.setConfigOption('imageAxisOrder', 'row-major')
-        img = pg.ImageItem(self.satMap.tile)
-        self.p.addItem(img)
-        self.p.showAxes(False)
-        self.p.setAspectLocked()
-        self.p.invertY()
+        img = pg.ImageItem(self.satMap.map_array)
+        img.setBorder({'color': 'b', 'width': 3})
+        self.click_plot.addItem(img)
+        self.click_plot.showAxes(False)
+        self.click_plot.setAspectLocked()
+        self.click_plot.invertY()
 
         # add arrow to show robot
-        self.robotArrow = pg.ArrowItem(headLen=40,tipAngle=30,brush='r')
-        self.p.addItem(self.robotArrow)
+        self.robotArrow = pg.ArrowItem(headLen=40, tipAngle=30, brush='r')
+        self.click_plot.addItem(self.robotArrow)
+
         # init ROI for editing path
         self.pathRoi = PolyLineROI_noHover([], closed=False)
-        self.p.addItem(self.pathRoi)
+        self.click_plot.addItem(self.pathRoi)
+
         # init plot for path
         self.pathPlotPoints = []
         self.pathGPS = []
         self.heading = 0
-        self.pathPlot = self.p.plot(symbolBrush=(255,0,255))
-        self.currentGoalMarker = self.p.plot(symbolBrush=(0,0,255))
+        self.pathPlot = self.click_plot.plot(symbolBrush=(255,0,255))
+        self.currentGoalMarker = self.click_plot.plot(symbolBrush=(0,0,255))
         self.pathIndex = 0
+
         # interaction for adding path points
-        self.p.addROIPoint = self.addROIPoint
+        self.click_plot.addROIPoint = self.addROIPoint
+
         # robot's history (path measured by gps)
         self.historyPoints = []
-        self.historyPlot = self.p.plot(pen=pg.mkPen('g',width=3))
+        self.historyPlot = self.click_plot.plot(pen=pg.mkPen('g',width=3))
         self.setHistory()
+        
         # add buttons
+        self.setup_widgets()
+
+        # ros sub pub
+        self.odom_sub = rospy.Subscriber('/nav/odom', Odometry, self.readOdom) # plotRobotPosition
+        self.navigation_sub = rospy.Subscriber('/gps_navigation/current_goal', PoseStamped, self.readNavigation) # get status of navigation controller
+        self.goal_pub = rospy.Publisher('/gps_navigation/goal', PoseStamped, queue_size=5)
+        self.location_sub = rospy.Subscriber('/gnss1/fix', NavSatFix, self.location)
+        self.heading_sub = rospy.Subscriber('/nav/heading', FilterHeading, self.set_heading)
+        self.pubCTRL = rospy.Publisher('pxrf_gui', String, queue_size=2)
+        self.subCTRL = rospy.Subscriber('pxrf_response', String, self.pxrfListener)
+        self.speedRead = rospy.Subscriber('/motor_controller/command', Twist, self.speedListener)
+        self.stopCommand = rospy.Publisher('/cmd_vel/managed', Twist, queue_size=5)
+
+    def setup_widgets(self):
+
+        def prevGoal():
+            self.changeGoal(changeDir=-1)
+
+        def nextGoal():
+            self.changeGoal(changeDir=1)
+
+        def clearHistory():
+            self.setHistory(clear = True)
+
         clearHistoryBtn = QtWidgets.QPushButton('Clear History')
         clearHistoryBtn.clicked.connect(clearHistory)
         clearPathBtn = QtWidgets.QPushButton('Clear Path')
@@ -217,10 +263,10 @@ class gps_user_input(object):
         self.widget.addWidget(self.stopBtn, row = 3, col = 6, colspan = 2)
         self.pxrfBtn = QtWidgets.QPushButton('Sample')
         self.pxrfStatus = False
-        self.pxrfBtn.clicked.connect(self.pxrf)
+        self.pxrfBtn.clicked.connect(self.start_pxrf_collection)
         self.widget.addWidget(self.pxrfBtn, row = 3, col = 3, colspan = 1)
-        #text widget
 
+        #text widget
         self.statusGPS = QtWidgets.QLineEdit()
         self.statusGPS.setText('GPS Connecting')
         self.statusGPS.setReadOnly(True)
@@ -241,32 +287,21 @@ class gps_user_input(object):
         #self.status.setColor(pg.Qt.QtGui.QColor("red"))
         #self.status.setText("testing")
         #self.widget.addWidget(self.status, row = 1, col = 1)
-        self.widget.addWidget(clearHistoryBtn,row=2,col=0)
-        self.widget.addWidget(clearPathBtn,row=2,col=1)
-        self.widget.addWidget(self.editPathBtn,row=2,col=2)
-        self.widget.addWidget(loadPathFileBtn,row=2,col=3)
-        self.widget.addWidget(savePathBtn,row=2,col=4)
-        self.widget.addWidget(self.startPauseBtn,row=2,col=5, colspan = 1)
-        self.widget.addWidget(prevGoalBtn,row=2,col=6)
-        self.widget.addWidget(nextGoalBtn,row=2,col=7)
-        self.widget.addWidget(self.statusGPS, row = 1, col = 0, colspan = 5)
-        self.widget.addWidget(self.statusNav, row = 1, col = 5, colspan = 1)
-        self.widget.addWidget(self.statusSpeed, row = 1, col = 6, colspan = 1)
-        self.widget.addWidget(self.statusPxrf, row = 1, col = 7, colspan = 1)
+        self.widget.addWidget(clearHistoryBtn, row=2, col=0)
+        self.widget.addWidget(clearPathBtn, row=2, col=1)
+        self.widget.addWidget(self.editPathBtn, row=2, col=2)
+        self.widget.addWidget(loadPathFileBtn, row=2, col=3)
+        self.widget.addWidget(savePathBtn,row=2, col=4)
+        self.widget.addWidget(self.startPauseBtn,row=2, col=5, colspan=1)
+        self.widget.addWidget(prevGoalBtn, row=2, col=6)
+        self.widget.addWidget(nextGoalBtn, row=2, col=7)
+        self.widget.addWidget(self.statusGPS, row=1, col=0, colspan=5)
+        self.widget.addWidget(self.statusNav, row=1, col=5, colspan=1)
+        self.widget.addWidget(self.statusSpeed, row=1, col=6, colspan=1)
+        self.widget.addWidget(self.statusPxrf, row=1, col=7, colspan=1)
         #self.widget.addLabel(text = "Mode: "+ self.statusNav, row = 1, col = 0, colspan = 2 )
         #self.widget.addLabel(text = "GPS: " + self.statusGPS, row = 1, col = 3, colspan = 2 )
         #self.widget.addLabel(text = "PXRF status: " + self.statusPxrf,  row = 1,  col = 5, colspan = 2)
-        
-        # ros sub pub
-        self.odom_sub = rospy.Subscriber('/nav/odom',Odometry,self.readOdom) # plotRobotPosition
-        self.navigation_sub = rospy.Subscriber('/gps_navigation/current_goal',PoseStamped,self.readNavigation) # get status of navigation controller
-        self.goal_pub = rospy.Publisher('/gps_navigation/goal',PoseStamped,queue_size=5)
-        self.location_sub = rospy.Subscriber('/nav/gnss1/fix', NavSatFix, self.location)
-        self.set_heading = rospy.Subscriber('/nav/heading', FilterHeading, self.set_heading)
-        self.pubCTRL = rospy.Publisher('pxrf_gui', String, queue_size = 2)
-        self.subCTRL = rospy.Subscriber('pxrf_response', String, self.pxrfListener)
-        self.speedRead = rospy.Subscriber('/motor_controller/command', Twist, self.speedListener)
-        self.stopCommand = rospy.Publisher('/cmd_vel/managed', Twist, queue_size = 5)
     
     def speedListener(self, msg):
         if msg.angular.x == 1:
@@ -275,7 +310,6 @@ class gps_user_input(object):
         elif msg.angular.x == -1:
             self.highSpeed = False
             self.statusSpeed.setText("Low Speed")
-
 
     def pxrfListener(self, msg):
         if  msg.data == "201":
@@ -296,8 +330,10 @@ class gps_user_input(object):
         self.heading = data.heading_rad 
 
         #self.prev_heading = self. heading
-        # This function adds points to roi (when user is editing path)
+
+    # This function adds points to roi (when user is editing path)
     def addROIPoint(self,point):
+        print('click')
         if self.editPathMode:
             points = [[handle['pos'].x(),handle['pos'].y()] for handle in self.pathRoi.handles]
             points.append(point)
@@ -352,7 +388,7 @@ class gps_user_input(object):
     
     # This function loads path from csv file chosen by user
     def loadPathFile(self):
-        fn = str(pg.QtGui.QFileDialog.getOpenFileName()[0])
+        fn = str(QtGui.QFileDialog.getOpenFileName()[0])
         #pathFn = easygui.fileopenbox()
         if fn =='':
             return
@@ -373,7 +409,7 @@ class gps_user_input(object):
 
     # this function saves the current path as csv file
     def savePath(self):
-        fn = str(pg.QtGui.QFileDialog.getSaveFileName()[0])
+        fn = str(QtGui.QFileDialog.getSaveFileName()[0])
         csvFile = open(fn,'w',newline='')
         csvWriter = csv.writer(csvFile,delimiter=',')
         csvWriter.writerow(['lat','lon','stop'])
@@ -396,7 +432,7 @@ class gps_user_input(object):
     def changeGoal(self,reset=False,changeDir=1):
         self.pathIndex = self.pathIndex + changeDir
         if self.pathIndex < 0:
-            self.pathIndex+=len(self.pathPlotPoints)
+            self.pathIndex = max(self.pathIndex+len(self.pathPlotPoints), 0)
         if reset or self.pathIndex >= len(self.pathPlotPoints):
             self.pathIndex = 0
             if self.startPauseStatus:
@@ -413,17 +449,21 @@ class gps_user_input(object):
 
     # This function is called by subscriber of gps sensor
     def readOdom(self,data):
-        if (abs(data.pose.pose.position.x - self.prev_lat) < 2 or abs(data.pose.pose.position.y - self.prev_lon) < 2):
-            lat = data.pose.pose.position.x
-            #print("lat" + str(lat))
-            lon = data.pose.pose.position.y
-        else:
-            lat = self.prev_lat
-            lon = self.prev_lon
+        #if (abs(data.pose.pose.position.x - self.prev_lat) < 2 or abs(data.pose.pose.position.y - self.prev_lon) < 2):
+        #    lat = data.pose.pose.position.x
+        #    #print("lat" + str(lat))
+        #    lon = data.pose.pose.position.y
+        #else:
+        #    lat = self.prev_lat
+        #    lon = self.prev_lon
+
+        lat = data.pose.pose.position.x
+        lon = data.pose.pose.position.y
 
         #calculate heading based on gps coordinates 
-        pixX,pixY = self.satMap.coord2Pixel([lat,lon])
-        prevpixX,prevpixY = self.satMap.coord2Pixel([self.prev_lat, self.prev_lon])
+        pixX, pixY = self.satMap.coord2Pixel([lat, lon])
+        #print(f"GPS -> pixels ({lat}, {lon}) -> {pixX}, {pixY}")
+        prevpixX, prevpixY = self.satMap.coord2Pixel([self.prev_lat, self.prev_lon])
         #
         #run = pixX - prevpixX
         ##print(run)
@@ -447,15 +487,15 @@ class gps_user_input(object):
         robotHeading = self.heading
         #print("robotHeading "+ str(robotHeading))
         quat = data.pose.pose.orientation
-        r = R.from_quat([quat.x,quat.y,quat.z,quat.w])
+        r = R.from_quat([quat.x, quat.y, quat.z, quat.w])
         #xVec = r.as_dcm()[:,0]
         #robotHeading = np.mod(math.atan2(xVec[1],xVec[0])+np.pi/3.0,2*np.pi)
         #robotHeading = self.heading #math.atan2(xVec[0],xVec[1])
         if not self.robotArrow is None:
             self.robotArrow.setStyle(angle = robotHeading*180.0/np.pi + 90.0)
-            self.robotArrow.setPos(pixX,pixY)
+            self.robotArrow.setPos(pixX, pixY)
             self.robotArrow.update()
-        self.historyPoints.append([pixX,pixY])
+        self.historyPoints.append([pixX, pixY])
         self.setHistory()
         self.prev_lat = lat
         self.prev_lon = lon
@@ -469,11 +509,12 @@ class gps_user_input(object):
             self.statusGPS.setText("lon: " + str(round(self.longitude,4)) + " " +"lat: " + str(round(self.latitude, 4)) )
         else:
             self.statusGPS.setText("GPS connecting")
+
     #this function checks status of navigation controller
     def readNavigation(self,data):
         if self.startPauseStatus:
             self.statusNav.setText("Automatic navigation")
-            currNavGoal = np.array([data.pose.position.y,data.pose.position.x])
+            currNavGoal = np.array([data.pose.position.y, data.pose.position.x])
             desNavGoal = np.array(self.pathGPS[self.pathIndex][0:2])
             onCurrentGoal = np.linalg.norm(desNavGoal-currNavGoal) < 1e-4
             navFinished = data.pose.position.z < 0
@@ -494,12 +535,16 @@ class gps_user_input(object):
             msg.pose.position.y = float('nan')
             msg.pose.position.z = -1
             self.goal_pub.publish(msg)
+
     def boustrophedon(self):
         return
+
     def draw_boundary(self):
         return
+
     def adaptive(self):
         return
+
     def stop(self):
         self.startPauseStatus = 0
         command = Twist()
@@ -510,8 +555,8 @@ class gps_user_input(object):
         command.angular.y = 0
         command.angular.z = 0
         self.stopCommand.publish(command)
-        return
-    def pxrf(self):
+
+    def start_pxrf_collection(self):
         if not self.pxrfStatus:
             self.statusPxrf.setText("Collecting")
             self.pxrfRunning = True
@@ -524,18 +569,28 @@ class gps_user_input(object):
             self.pxrfBtn.setText("Sample")
             self.pubCTRL.publish("stop")
             self.pxrfStatus = False
-        return
+
+
 if __name__ == '__main__':
-    location_input = read_location()
+    rospy.init_node('gps_user_input',anonymous=True)
 
-    lat_set, lon_set = [float(n) for n in location_input[1:3]]
-    zoom_set = int(location_input[3])
-    width_set, height_set = [int(n) for n in location_input[4:6]]
+    try:
+       lat = float(rospy.get_param('~lat'))
+       lon = float(rospy.get_param('~lon'))
+       zoom = int(rospy.get_param('~zoom'))
+       height = int(rospy.get_param('~height'))
+       width = int(rospy.get_param('~width'))
+    except:
+        location_input = read_location()
 
-    print([lat_set, lon_set, zoom_set, width_set, height_set])
+        lat, lon = [float(n) for n in location_input[1:3]]
+        zoom = int(location_input[3])
+        width, height = [int(n) for n in location_input[4:6]]
+
     app = QtWidgets.QApplication([])
     mw = QtWidgets.QMainWindow()
-    gps_node = gps_user_input()
+    print(f'{lat}, {lon}, {width}, {height}')
+    gps_node = GpsNavigationGui(lat, lon, zoom, width, height)
     mw.setCentralWidget(gps_node.widget)
     mw.show()
     if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):

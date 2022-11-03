@@ -4,7 +4,14 @@ from tkinter import *
 import rospy
 from std_msgs.msg import String
 import sys
-sys.path.insert(0,"/home/cvx/catkin_ws/src/pxrf/scripts")
+
+# add pxrf's plot script to lookup path
+import os
+import rospkg
+rospack = rospkg.RosPack()
+pxrf_path = rospack.get_path('pxrf')
+sys.path.insert(0, os.path.abspath(os.path.join(pxrf_path, "scripts")))
+
 from plot import generate_plot
 from sensor_msgs.msg import NavSatFix
 
@@ -23,7 +30,7 @@ class App:
         self.buttonwidth = int(self.width*0.25)
         self.buttonheight = int(self.height*0.1)
         self.safety = Label(root, text="Operation Safety: \n 1) drive disabled if pxrf is low on the ground \n 2) Hold B to operate rake and pxrf \n 3) In case of malfunction, use the emergency stop / press CTRL + C ", font=("Courier", 14))
-        self.safety.place(relx = 0.5, rely = 0.05, anchor = 'center')
+        self.safety.place(relx = 0.5, rely = 0.1, anchor = 'center')
         
         self.pxrfLabel = Label(root, text="PXRF Test Not Running", font=("Helvetica", 24))
         self.gpsLabel = Label(root, text="Searching for gps signal...", font=("Helvetica", 18))
@@ -32,14 +39,14 @@ class App:
 
         self.pixelVirtual = PhotoImage(width=1, height=1)
         self.pxrfButton = Button(window, text="Start", font=("Helvetica", 16), image=self.pixelVirtual, 
-                                command=self.startPXRF, width=self.buttonwidth, height=self.buttonheight, compound="c")
+                                command=self.start_pxrf, width=self.buttonwidth, height=self.buttonheight, compound="c")
         self.pxrfButton.place(relx = 0.5, rely = 0.5, anchor = 'center')
 
         # initialize node
         rospy.init_node('pxrf_gui', anonymous=True)
         self.pubCTRL = rospy.Publisher('pxrf_gui', String, queue_size=10)
         self.subCTRL = rospy.Subscriber("pxrf_response", String, self.listener)
-        self.gps = rospy.Subscriber("gps", NavSatFix, self.location)
+        self.gps = rospy.Subscriber("/gnss1/fix", NavSatFix, self.location)
         # add sleep after button press (prevent overclicks)
         self.rate = rospy.Rate(1)
 
@@ -55,11 +62,12 @@ class App:
            # self.rate.sleep()
             #time.sleep(2)
             #generate_plot()
+
     def location(self,msg):
         if (msg.longitude != None and msg.latitude != None):
             self.gpsLabel.config(text="GPS found")
 		     
-    def startPXRF(self):
+    def start_pxrf(self):
         if not self.pxrfRunning:
             print("PXRF Test Started!")
             self.pxrfLabel.config(text="PXRF Test Running!")

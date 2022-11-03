@@ -1,6 +1,6 @@
 # gps_navigation
 The gps_navigation package contains the source code for waypoint navigation and GUI.
-To launch: please launch navigate_no_rviz.launch
+To launch: please run `roslaunch gps_naviation navigate_no_rviz.launch`
 
 The following files in the src are used:
 

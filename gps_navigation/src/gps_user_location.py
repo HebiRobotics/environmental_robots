@@ -14,7 +14,8 @@ def read_location():
     print("please ensure that the robot is connected to the wifi")
     data = []
     num = 0
-    with open(os.path.join(work_dir_path, 'locations.csv'), 'r') as csvfile:
+    data_file = os.path.join(work_dir_path, 'locations.csv')
+    with open(data_file, 'r') as csvfile:
         reader = csv.reader(csvfile, delimiter = ',')
         for row in reader:
             if row:
@@ -41,7 +42,7 @@ def read_location():
             width = input("enter the width - recommend 10: ")
             height = input("enter the height - recommend 10: ")
             new_location = [filename + "," + lat + "," + lon + "," + zoom + "," + width + "," + height]
-            with open('locations.csv', 'a') as writefile:
+            with open(data_file, 'a') as writefile:
                 writer = csv.writer(writefile)
                 writer.writerow([filename, lat, lon, zoom, width, height])
             print("new location added successfully")
