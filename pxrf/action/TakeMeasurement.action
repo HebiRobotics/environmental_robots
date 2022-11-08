@@ -1,0 +1,7 @@
+# Define the goal
+std_msgs/Empty start
+---
+# Define the result
+---
+# Define the feedback message
+std_msgs/Empty finish

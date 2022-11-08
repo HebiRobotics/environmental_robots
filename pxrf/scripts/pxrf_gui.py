@@ -25,8 +25,7 @@ class App:
         self.xoffset = 200
         self.yoffset = 200
 
-        self.window.geometry("{}x{}+{}+{}".format(self.width, self.height, 
-                                             self.xoffset, self.yoffset))
+        self.window.geometry(f"{self.width}x{self.height}+{self.xoffset}+{self.yoffset}")
         self.buttonwidth = int(self.width*0.25)
         self.buttonheight = int(self.height*0.1)
         self.safety = Label(root, text="Operation Safety: \n 1) drive disabled if pxrf is low on the ground \n 2) Hold B to operate rake and pxrf \n 3) In case of malfunction, use the emergency stop / press CTRL + C ", font=("Courier", 14))
@@ -39,20 +38,18 @@ class App:
 
         self.pixelVirtual = PhotoImage(width=1, height=1)
         self.pxrfButton = Button(window, text="Start", font=("Helvetica", 16), image=self.pixelVirtual, 
-                                command=self.start_pxrf, width=self.buttonwidth, height=self.buttonheight, compound="c")
+                                command=self.toggle_pxrf, width=self.buttonwidth, height=self.buttonheight, compound="c")
         self.pxrfButton.place(relx = 0.5, rely = 0.5, anchor = 'center')
 
         # initialize node
         rospy.init_node('pxrf_gui', anonymous=True)
-        self.pubCTRL = rospy.Publisher('pxrf_gui', String, queue_size=10)
+        self.pubCTRL = rospy.Publisher('pxrf_cmd', String, queue_size=10)
         self.subCTRL = rospy.Subscriber("pxrf_response", String, self.listener)
         self.gps = rospy.Subscriber("/gnss1/fix", NavSatFix, self.location)
         # add sleep after button press (prevent overclicks)
         self.rate = rospy.Rate(1)
 
         self.pxrfRunning = False
-
-        self.pxrfProc = None
         
     def listener(self, msg):
         if msg.data == "201":
@@ -67,7 +64,7 @@ class App:
         if (msg.longitude != None and msg.latitude != None):
             self.gpsLabel.config(text="GPS found")
 		     
-    def start_pxrf(self):
+    def toggle_pxrf(self):
         if not self.pxrfRunning:
             print("PXRF Test Started!")
             self.pxrfLabel.config(text="PXRF Test Running!")

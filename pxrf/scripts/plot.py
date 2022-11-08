@@ -8,12 +8,18 @@ element = []
 concentration = []
 error = []
 
+# add pxrf's plot script to lookup path
+import os
+import rospkg
+rospack = rospkg.RosPack()
+pxrf_path = rospack.get_path('pxrf')
+
 def generate_plot():
 #setable parameters
 	threshold = 0.01
 	number_of_elements_display_limit = 10
 
-	with open('/home/cvx/catkin_ws/src/pxrf/scripts/chemistry.csv','r') as csvfile:
+	with open(os.path.join(pxrf_path, '/scripts/chemistry.csv'),'r') as csvfile:
 		data = list(csv.reader(csvfile, delimiter = ','))
 		for row in range(len(data)):
 		    if(len(data[row])>2):

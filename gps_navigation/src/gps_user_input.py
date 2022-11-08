@@ -208,9 +208,12 @@ class GpsNavigationGui:
         self.goal_pub = rospy.Publisher('/gps_navigation/goal', PoseStamped, queue_size=5)
         self.location_sub = rospy.Subscriber('/gnss1/fix', NavSatFix, self.location)
         self.heading_sub = rospy.Subscriber('/nav/heading', FilterHeading, self.set_heading)
-        self.pubCTRL = rospy.Publisher('pxrf_gui', String, queue_size=2)
+
+        self.pubCTRL = rospy.Publisher('pxrf_cmd', String, queue_size=2)
         self.subCTRL = rospy.Subscriber('pxrf_response', String, self.pxrfListener)
+
         self.speedRead = rospy.Subscriber('/motor_controller/command', Twist, self.speedListener)
+
         self.stopCommand = rospy.Publisher('/cmd_vel/managed', Twist, queue_size=5)
 
     def setup_widgets(self):

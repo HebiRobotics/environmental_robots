@@ -13,7 +13,14 @@ find_package(catkin REQUIRED COMPONENTS
     roscpp 
     rospy 
     std_msgs 
+    actionlib
+    actionlib_msgs
     message_generation
+)
+
+add_action_files(
+    DIRECTORY action
+    FILES TakeMeasurement.action
 )
 
 add_message_files(
@@ -24,6 +31,7 @@ add_message_files(
 generate_messages(
     DEPENDENCIES
     std_msgs
+    actionlib_msgs
 )
 
 ## Declare a catkin package
@@ -50,6 +58,7 @@ target_link_libraries(
 )
 
 catkin_install_python(PROGRAMS
+	scripts/pxrf_manager.py
 	scripts/pxrf_gui.py
 	scripts/chemistry_parser.py
 	DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}

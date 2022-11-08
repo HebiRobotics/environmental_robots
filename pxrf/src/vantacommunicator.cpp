@@ -11,7 +11,7 @@ VantaCommunicator::VantaCommunicator(int argc, char** argv)
     timer->start(1000);
     chemistry_pub = n.advertise<pxrf::PxrfMsg>("pxrf_data", 1000);
     response_pub = n.advertise<std_msgs::String>("pxrf_response", 1000);
-    ctrl_sub = n.subscribe("pxrf_gui", 1000, &VantaCommunicator::callback, this);
+    ctrl_sub = n.subscribe("pxrf_cmd", 1000, &VantaCommunicator::callback, this);
 }
 
 VantaCommunicator::~VantaCommunicator()
