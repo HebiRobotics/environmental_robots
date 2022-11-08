@@ -12,7 +12,7 @@ if __name__ == '__main__':
     lookup = hebi.Lookup()
     rospy.sleep(2)
 
-    family = 'HEBI'
+    family = 'Chevron'
     names = ['J1_rake']
     tool_arm = lookup.get_group_from_names(family, names)
     while tool_arm is None:
@@ -22,11 +22,11 @@ if __name__ == '__main__':
 
     tool_arm_fbk = tool_arm.get_next_feedback()
 
-    tool_angle_down = 0.0
-    tool_angle_up = 0.0
+    tool_angle_down = 1.4
+    tool_angle_up = 2.5
 
 
-    family = 'HEBI'
+    family = 'Chevron'
     names = ['J1_shoulder', 'J2_elbow']
     sensor_arm = lookup.get_group_from_names(family, names)
     while sensor_arm is None:
@@ -36,8 +36,8 @@ if __name__ == '__main__':
 
     sensor_arm_fbk = sensor_arm.get_next_feedback()
 
-    sensor_angles_down = [0.0, 0.0]
-    sensor_angles_up = [0.0, 0.0]
+    sensor_angles_down = [2.8, -0.6]
+    sensor_angles_up = [4.2, 1.5]
 
     t = rospy.get_time()
     tool_arm_trajectory = hebi.trajectory.create_trajectory([t, t+3], [tool_arm_fbk.position[0], tool_angle_up])
