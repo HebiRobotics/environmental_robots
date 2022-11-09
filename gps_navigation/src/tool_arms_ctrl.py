@@ -24,7 +24,7 @@ if __name__ == '__main__':
 
     tool_arm_fbk = tool_arm.get_next_feedback()
 
-    tool_angle_down = 1.4
+    tool_angle_down = 1.2
     tool_angle_up = 2.5
 
 
@@ -45,8 +45,8 @@ if __name__ == '__main__':
     tool_arm_trajectory = hebi.trajectory.create_trajectory([t, t+3], [tool_arm_fbk.position[0], tool_angle_up])
 
     positions = np.empty((2,2), dtype=np.float64)
-    positions[0, :] = sensor_arm_fbk.position
-    positions[1, :] = sensor_angles_up
+    positions[:, 0] = sensor_arm_fbk.position
+    positions[:, 1] = sensor_angles_up
     sensor_arm_trajectory = hebi.trajectory.create_trajectory([t, t+3], positions)
 
 
@@ -57,9 +57,9 @@ if __name__ == '__main__':
         curr_pos = tool_arm_fbk.position[0]
 
         if request.data:
-            end_pos = tool_angle_up
-        else:
             end_pos = tool_angle_down
+        else:
+            end_pos = tool_angle_up
 
         tool_arm_trajectory = hebi.trajectory.create_trajectory(times, [curr_pos, end_pos])
         return []
@@ -72,11 +72,11 @@ if __name__ == '__main__':
         positions = np.empty((2, 2), dtype=np.float64)
 
         if request.data:
-            positions[0, :] = sensor_arm_fbk.position
-            positions[1, :] = sensor_angles_down
+            positions[:, 0] = sensor_arm_fbk.position
+            positions[:, 1] = sensor_angles_down
         else:
-            positions[0, :] = sensor_arm_fbk.position
-            positions[1, :] = sensor_angles_up
+            positions[:, 0] = sensor_arm_fbk.position
+            positions[:, 1] = sensor_angles_up
 
         sensor_arm_trajectory = hebi.trajectory.create_trajectory(times, positions)
         return []
@@ -90,5 +90,12 @@ if __name__ == '__main__':
         tool_arm.get_next_feedback(reuse_fbk=tool_arm_fbk)
 
         p, v, a = sensor_arm_trajectory.get_state(t)
+        print(f'Sensor Arm position: {p}')
+        sensor_arm_cmd.position = p
+        sensor_arm_cmd.velocity = v
+        sensor_arm.send_command(sensor_arm_cmd)
 
-        rospy.spin()
+        p, v, a = tool_arm_trajectory.get_state(t)
+        tool_arm_cmd.position = p
+        tool_arm_cmd.velocity = v
+        tool_arm.send_command(tool_arm_cmd)
