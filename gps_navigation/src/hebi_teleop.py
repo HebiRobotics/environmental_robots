@@ -68,10 +68,10 @@ if __name__ == '__main__':
     last_time_active_teleop = last_fbk_mio
 
     def publish_twist(evt: TimerEvent):
-        global last_time_active_teleop
+        global last_time_active_teleop, parking_brake
         if parking_brake:
             cmd_pub.publish(park_twist)
-        if evt.current_real.to_time() - last_time_active_teleop > 2.0:
+        elif evt.current_real.to_time() - last_time_active_teleop > 2.0:
             cmd_pub.publish(gps_nav_twist)
         else:
             cmd_pub.publish(twist)
