@@ -30,6 +30,7 @@ if __name__ == '__main__':
         global parking_brake
         parking_brake = req.data
         msg = 'Brake On' if parking_brake else 'Brake Off'
+        rospy.loginfo(msg)
         return True, msg
 
     parking_brake_srv = rospy.Service('/parking_brake', SetBool, parking_cb)
@@ -81,6 +82,7 @@ if __name__ == '__main__':
         now = rospy.get_time()
         if not mio.update(0.0):
             if now - last_fbk_mio > 1.0:
+                rospy.logwarn('mobileIO connection lost, stopping robot')
                 twist.linear.x = 0.0
                 twist.angular.z = 0.0
             continue

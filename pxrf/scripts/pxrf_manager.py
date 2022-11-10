@@ -10,7 +10,7 @@ class TakeMeasurementServer:
     def __init__(self):
         self.server = actionlib.SimpleActionServer('take_measurement', TakeMeasurementAction, self.execute, False)
         self.cmd_pub = rospy.Publisher('pxrf_cmd', String, queue_size=1)
-        self.cmd_sub = rospy.Subscriber('pxrf_result', String, self.pxrf_cb)
+        self.cmd_sub = rospy.Subscriber('pxrf_response', String, self.pxrf_cb)
         self.deploy_pxrf = rospy.ServiceProxy('deploy_sensor', SetBool)
         self.pxrf_response = 'NoResponse'
         self.should_stop = False
