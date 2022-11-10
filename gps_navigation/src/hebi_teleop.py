@@ -1,10 +1,13 @@
 #! /usr/bin/env python3
 
-import rospy
-from geometry_msgs.msg import Twist
-from std_srvs.srv import SetBool
-
+import numpy as np
 import hebi
+
+import rospy
+from rospy.timer import TimerEvent
+from geometry_msgs.msg import Twist
+from std_srvs.srv import SetBool, SetBoolRequest
+
 
 TOOL_BTN = 3
 PXRF_BTN = 4
@@ -12,11 +15,30 @@ PXRF_BTN = 4
 FWD_AXIS = 8
 TURN_AXIS = 7
 
+
 if __name__ == '__main__':
     rospy.init_node('teleop')
 
-    cmd_pub = rospy.Publisher('~cmd_vel', Twist, queue_size=1)
     twist = Twist()
+
+    park_twist = Twist()
+    park_twist.linear.x = 0.0
+    park_twist.angular.z = 0.0
+
+    parking_brake = False
+    def parking_cb(req: SetBoolRequest):
+        global parking_brake
+        parking_brake = req.data
+
+    parking_brake_srv = rospy.Service('/parking_brake', SetBool, parking_cb)
+
+    gps_nav_twist = Twist()
+    def nav_cmd_cb(msg):
+        global gps_nav_twist
+        gps_nav_twist = msg
+    rospy.Subscriber('/cmd_vel/managed', Twist, nav_cmd_cb)
+
+    cmd_pub = rospy.Publisher('~cmd_vel', Twist, queue_size=1)
 
     deploy_tool = rospy.ServiceProxy('/deploy_tool', SetBool)
     deploy_sensor = rospy.ServiceProxy('/deploy_sensor', SetBool)
@@ -34,16 +56,30 @@ if __name__ == '__main__':
     mio.set_axis_label(TURN_AXIS, '')
     mio.set_axis_label(FWD_AXIS, 'drive')
 
-    def publish_twist(evt):
-        cmd_pub.publish(twist)
+    last_time_active_teleop = rospy.get_time()
+
+    def publish_twist(evt: TimerEvent):
+        global last_time_active_teleop
+        if parking_brake:
+            cmd_pub.publish(park_twist)
+        if evt.current_real - last_time_active_teleop > 2.0:
+            cmd_pub.publish(gps_nav_twist)
+        else:
+            cmd_pub.publish(twist)
 
     rospy.Timer(rospy.Duration.from_sec(0.2), publish_twist)
 
     while not rospy.is_shutdown():
-        mio.update()
+        if not mio.update():
+            continue
 
-        twist.linear.x = mio.get_axis_state(FWD_AXIS)
-        twist.angular.z = mio.get_axis_state(TURN_AXIS)
+        dx = mio.get_axis_state(FWD_AXIS)
+        drz = mio.get_axis_state(TURN_AXIS)
+        twist.linear.x = np.sign(dx) * dx ** 2
+        twist.angular.z = -1.0 * np.sign(drz) * drz ** 2
+
+        if twist.linear.x != 0.0 and twist.angular.z != 0:
+            last_time_active_teleop = rospy.get_time()
 
         if mio.get_button_diff(PXRF_BTN) == 1:
             deploy_sensor(True)

@@ -259,7 +259,8 @@ if __name__ == "__main__":
         mast_control.update(t, inputs)
         # Update mobileIO stream angle
         if inputs:
-            m._cmd.io.c.set_float(1, mast_control.camera.roll)
+            # pi rad offset needed for wide angle cameras
+            m._cmd.io.c.set_float(1, mast_control.camera.roll + np.pi)
             m._group.send_command(m._cmd)
 
         mast_control.send()

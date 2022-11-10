@@ -58,7 +58,6 @@ target_link_libraries(
 )
 
 catkin_install_python(PROGRAMS
-	scripts/pxrf_manager.py
 	scripts/pxrf_gui.py
 	scripts/chemistry_parser.py
 	DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
