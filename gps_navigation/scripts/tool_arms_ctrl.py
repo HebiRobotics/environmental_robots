@@ -3,6 +3,7 @@
 import rospy
 from geometry_msgs.msg import Twist
 from std_srvs.srv import SetBool, SetBoolRequest
+from std_msgs.msg import Float64
 
 import numpy as np
 import hebi
@@ -24,7 +25,7 @@ if __name__ == '__main__':
 
     tool_arm_fbk = tool_arm.get_next_feedback()
 
-    tool_angle_down = 1.2
+    tool_angle_down = 1.0
     tool_angle_up = 2.5
 
 
@@ -84,6 +85,14 @@ if __name__ == '__main__':
     rospy.Service('deploy_tool', SetBool, tool_arm_cb)
     rospy.Service('deploy_sensor', SetBool, sensor_arm_cb)
 
+    dig_power = 0.0
+    def dig_cb(msg):
+        global dig_power
+        dig_power = msg.data
+        print(f"DIGGITY LEVEL: {dig_power}")
+
+    rospy.Subscriber('dig_torque', Float64, dig_cb)
+
     while not rospy.is_shutdown():
         t = rospy.get_time()
         sensor_arm.get_next_feedback(reuse_fbk=sensor_arm_fbk)
@@ -97,4 +106,5 @@ if __name__ == '__main__':
         p, v, a = tool_arm_trajectory.get_state(t)
         tool_arm_cmd.position = p
         tool_arm_cmd.velocity = v
+        tool_arm_cmd.effort = -1 * dig_power
         tool_arm.send_command(tool_arm_cmd)
