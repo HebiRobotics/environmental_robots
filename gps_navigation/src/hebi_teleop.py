@@ -6,8 +6,8 @@ from std_srvs.srv import SetBool
 
 import hebi
 
-TOOL_BTN = 1
-PXRF_BTN = 3
+TOOL_BTN = 3
+PXRF_BTN = 4
 
 FWD_AXIS = 8
 TURN_AXIS = 7
