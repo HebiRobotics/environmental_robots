@@ -97,7 +97,8 @@ if __name__ == '__main__':
 
         last_fbk_mio = now
 
-        dig_torque.data = -20 * mio.get_axis_state(DIG_SLIDER)
+        # range [-2, 20]
+        dig_torque.data = 11 * (mio.get_axis_state(DIG_SLIDER) + 1.0) - 2.0
         dig_pub.publish(dig_torque)
 
         dx = mio.get_axis_state(FWD_AXIS)
