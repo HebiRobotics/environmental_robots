@@ -61,13 +61,14 @@ if __name__ == '__main__':
     mio.set_axis_label(TURN_AXIS, '')
     mio.set_axis_label(FWD_AXIS, 'drive')
 
-    last_time_active_teleop = rospy.get_time()
+    last_fbk_mio = rospy.get_time()
+    last_time_active_teleop = last_fbk_mio
 
     def publish_twist(evt: TimerEvent):
         global last_time_active_teleop
         if parking_brake:
             cmd_pub.publish(park_twist)
-        if evt.current_real - last_time_active_teleop > 2.0:
+        if evt.current_real.to_time() - last_time_active_teleop > 2.0:
             cmd_pub.publish(gps_nav_twist)
         else:
             cmd_pub.publish(twist)
@@ -75,8 +76,14 @@ if __name__ == '__main__':
     rospy.Timer(rospy.Duration.from_sec(0.2), publish_twist)
 
     while not rospy.is_shutdown():
-        if not mio.update():
+        now = rospy.get_time()
+        if not mio.update(0.0):
+            if now - last_fbk_mio > 1.0:
+                twist.linear.x = 0.0
+                twist.angular.z = 0.0
             continue
+
+        last_fbk_mio = now
 
         dx = mio.get_axis_state(FWD_AXIS)
         drz = mio.get_axis_state(TURN_AXIS)
@@ -84,7 +91,7 @@ if __name__ == '__main__':
         twist.angular.z = -1.0 * np.sign(drz) * drz ** 2
 
         if twist.linear.x != 0.0 and twist.angular.z != 0:
-            last_time_active_teleop = rospy.get_time()
+            last_time_active_teleop = last_fbk_mio
 
         if mio.get_button_diff(PXRF_BTN) == 1:
             deploy_sensor(True)
