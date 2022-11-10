@@ -210,7 +210,6 @@ def parse_mobile_feedback(m: 'MobileIO'):
     pan  = -1.0 * m.get_axis_state(1)
     tilt = m.get_axis_state(2)
 
-    print(flood_light)
     return MastInputs([pan, tilt], m.get_button_state(1), flood=flood_light)
 
 
