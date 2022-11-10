@@ -90,7 +90,6 @@ if __name__ == '__main__':
         tool_arm.get_next_feedback(reuse_fbk=tool_arm_fbk)
 
         p, v, a = sensor_arm_trajectory.get_state(t)
-        print(f'Sensor Arm position: {p}')
         sensor_arm_cmd.position = p
         sensor_arm_cmd.velocity = v
         sensor_arm.send_command(sensor_arm_cmd)
