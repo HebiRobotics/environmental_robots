@@ -29,7 +29,8 @@ if __name__ == '__main__':
     def parking_cb(req: SetBoolRequest):
         global parking_brake
         parking_brake = req.data
-        return True
+        msg = 'Brake On' if parking_brake else 'Brake Off'
+        return True, msg
 
     parking_brake_srv = rospy.Service('/parking_brake', SetBool, parking_cb)
 
