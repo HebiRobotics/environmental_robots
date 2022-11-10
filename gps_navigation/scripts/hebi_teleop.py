@@ -6,6 +6,7 @@ import hebi
 import rospy
 from rospy.timer import TimerEvent
 from geometry_msgs.msg import Twist
+from std_msgs.msg import Float64
 from std_srvs.srv import SetBool, SetBoolRequest
 
 
@@ -14,6 +15,8 @@ PXRF_BTN = 4
 
 FWD_AXIS = 8
 TURN_AXIS = 7
+
+DIG_SLIDER = 4
 
 
 if __name__ == '__main__':
@@ -42,6 +45,7 @@ if __name__ == '__main__':
     rospy.Subscriber('/cmd_vel/managed', Twist, nav_cmd_cb)
 
     cmd_pub = rospy.Publisher('~cmd_vel', Twist, queue_size=1)
+    dig_pub = rospy.Publisher('/dig_power', Float64, queue_size=1)
 
     deploy_tool = rospy.ServiceProxy('/deploy_tool', SetBool)
     deploy_sensor = rospy.ServiceProxy('/deploy_sensor', SetBool)
@@ -64,6 +68,8 @@ if __name__ == '__main__':
     mio.set_axis_label(TURN_AXIS, '')
     mio.set_axis_label(FWD_AXIS, 'drive')
 
+    mio.set_axis_label(DIG_SLIDER, 'dig')
+
     last_fbk_mio = rospy.get_time()
     last_time_active_teleop = last_fbk_mio
 
@@ -78,6 +84,8 @@ if __name__ == '__main__':
 
     rospy.Timer(rospy.Duration.from_sec(0.2), publish_twist)
 
+    dig_power = Float64(0.0)
+
     while not rospy.is_shutdown():
         now = rospy.get_time()
         if not mio.update(0.0):
@@ -88,6 +96,9 @@ if __name__ == '__main__':
             continue
 
         last_fbk_mio = now
+
+        dig_power.data = -20 * mio.get_axis_state(DIG_SLIDER)
+        dig_pub.publish(dig_power)
 
         dx = mio.get_axis_state(FWD_AXIS)
         drz = mio.get_axis_state(TURN_AXIS)
