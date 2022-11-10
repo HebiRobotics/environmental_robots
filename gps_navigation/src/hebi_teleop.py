@@ -45,7 +45,12 @@ if __name__ == '__main__':
 
     lookup = hebi.Lookup()
     rospy.sleep(2)
-    mio = hebi.util.create_mobile_io(lookup, 'Chevron')
+    family = 'Chevron'
+    mio = hebi.util.create_mobile_io(lookup, family)
+    while mio is None:
+        mio = hebi.util.create_mobile_io(lookup, family)
+        rospy.logwarn(f"Can't find mobileIO device {family}/mobileIO, trying again...")
+        rospy.sleep(1)
 
     mio.set_button_label(PXRF_BTN, 'pxrf')
     mio.set_button_label(TOOL_BTN, 'tool')
