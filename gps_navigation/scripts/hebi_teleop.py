@@ -45,7 +45,7 @@ if __name__ == '__main__':
     rospy.Subscriber('/cmd_vel/managed', Twist, nav_cmd_cb)
 
     cmd_pub = rospy.Publisher('~cmd_vel', Twist, queue_size=1)
-    dig_pub = rospy.Publisher('/dig_power', Float64, queue_size=1)
+    dig_pub = rospy.Publisher('/dig_torque', Float64, queue_size=1)
 
     deploy_tool = rospy.ServiceProxy('/deploy_tool', SetBool)
     deploy_sensor = rospy.ServiceProxy('/deploy_sensor', SetBool)
@@ -84,7 +84,7 @@ if __name__ == '__main__':
 
     rospy.Timer(rospy.Duration.from_sec(0.2), publish_twist)
 
-    dig_power = Float64(0.0)
+    dig_torque = Float64(0.0)
 
     while not rospy.is_shutdown():
         now = rospy.get_time()
@@ -97,8 +97,8 @@ if __name__ == '__main__':
 
         last_fbk_mio = now
 
-        dig_power.data = -20 * mio.get_axis_state(DIG_SLIDER)
-        dig_pub.publish(dig_power)
+        dig_torque.data = -20 * mio.get_axis_state(DIG_SLIDER)
+        dig_pub.publish(dig_torque)
 
         dx = mio.get_axis_state(FWD_AXIS)
         drz = mio.get_axis_state(TURN_AXIS)
