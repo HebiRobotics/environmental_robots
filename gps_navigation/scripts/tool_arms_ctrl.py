@@ -38,8 +38,8 @@ if __name__ == '__main__':
 
     sensor_arm_fbk = sensor_arm.get_next_feedback()
 
-    sensor_angles_down = [2.8, -0.6]
-    sensor_angles_up = [4.2, 1.5]
+    sensor_angles_down = [-0.3, -0.3]
+    sensor_angles_up = [1.0, 1.0]
 
     t = rospy.get_time()
     tool_arm_trajectory = hebi.trajectory.create_trajectory([t, t+3], [tool_arm_fbk.position[0], tool_angle_up])
