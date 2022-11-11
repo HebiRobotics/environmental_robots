@@ -16,8 +16,12 @@ from geometry_msgs.msg import Point, Quaternion, Twist, TwistStamped, PoseStampe
 import pandas as pd
 import csv
 from std_msgs.msg import String
+from std_srvs.srv import SetBool
 from sensor_msgs.msg import NavSatFix
 from microstrain_inertial_msgs.msg import FilterHeading
+
+import actionlib
+from pxrf.msg import TakeMeasurementAction, TakeMeasurementGoal
 
 # add pxrf's plot script to lookup path
 import rospkg
@@ -36,7 +40,7 @@ width_set = 0
 height_set = 0
 #gps_fidelity = 1.0
 
-def deg2num(lat_deg, lon_deg, zoom):
+def deg2num(lat_deg, lon_deg, zoom: int):
     lat_rad = math.radians(lat_deg)
     n = 2.0 ** zoom
     xtile = (lon_deg + 180.0) / 360.0 * n
@@ -195,12 +199,18 @@ class GpsNavigationGui:
         self.click_plot.addROIPoint = self.addROIPoint
 
         # robot's history (path measured by gps)
-        self.historyPoints = []
+        self.historyPoints: list[list[int]] = []
         self.historyPlot = self.click_plot.plot(pen=pg.mkPen('g',width=3))
         self.setHistory()
+
+        # ros services
+        self.parking_brake = rospy.ServiceProxy('/parking_brake', SetBool)
         
         # add buttons
         self.setup_widgets()
+
+        # ros action clients
+        self.pxrf_client = actionlib.SimpleActionClient('/take_measurement', TakeMeasurementAction)
 
         # ros sub pub
         self.odom_sub = rospy.Subscriber('/nav/odom', Odometry, self.readOdom) # plotRobotPosition
@@ -209,12 +219,12 @@ class GpsNavigationGui:
         self.location_sub = rospy.Subscriber('/gnss1/fix', NavSatFix, self.location)
         self.heading_sub = rospy.Subscriber('/nav/heading', FilterHeading, self.set_heading)
 
-        self.pubCTRL = rospy.Publisher('pxrf_cmd', String, queue_size=2)
-        self.subCTRL = rospy.Subscriber('pxrf_response', String, self.pxrfListener)
+        #self.pubCTRL = rospy.Publisher('pxrf_cmd', String, queue_size=2)
+        #self.subCTRL = rospy.Subscriber('pxrf_response', String, self.pxrfListener)
 
-        self.speedRead = rospy.Subscriber('/motor_controller/command', Twist, self.speedListener)
+        #self.speedRead = rospy.Subscriber('/motor_controller/command', Twist, self.speedListener)
 
-        self.stopCommand = rospy.Publisher('/cmd_vel/managed', Twist, queue_size=5)
+        #self.stopCommand = rospy.Publisher('/cmd_vel/managed', Twist, queue_size=5)
 
     def setup_widgets(self):
 
@@ -233,7 +243,7 @@ class GpsNavigationGui:
         clearPathBtn.clicked.connect(self.clearPath)
         self.editPathBtn = QtWidgets.QPushButton('Edit Path')
         self.editPathMode = False
-        self.editPathBtn.clicked.connect(self.editPath)
+        self.editPathBtn.clicked.connect(self.toggleEditPathMode)
         loadPathFileBtn = QtWidgets.QPushButton('Load Path')
         loadPathFileBtn.clicked.connect(self.loadPathFile)
         savePathBtn = QtWidgets.QPushButton('Save Path')
@@ -247,27 +257,31 @@ class GpsNavigationGui:
         nextGoalBtn.clicked.connect(nextGoal)
         
         #second row of buttons
-        self.boundaryBtn = QtWidgets.QPushButton('Draw Boundary')
-        self.boundaryStatus = False
-        self.boundaryBtn.clicked.connect(self.draw_boundary)
-        self.bdBtn = QtWidgets.QPushButton('Boustrophedon')
-        self.bdStatus = False
-        self.bdBtn.clicked.connect(self.boustrophedon)
-        self.adaptiveBtn = QtWidgets.QPushButton('Adaptive')
-        self.adaptiveStatus = False
-        self.adaptiveBtn.clicked.connect(self.adaptive)
-        self.widget.addWidget(self.boundaryBtn, row = 3, col = 0, colspan = 1)
-        self.widget.addWidget(self.bdBtn, row = 3, col = 1, colspan = 1)
-        self.widget.addWidget(self.adaptiveBtn, row = 3, col = 2, colspan = 1)
-        self.stopBtn = QtWidgets.QPushButton('STOP ROBOT')
-        self.stopStatus = False
-        self.stopBtn.setStyleSheet("background-color : red")
-        self.stopBtn.clicked.connect(self.stop)
-        self.widget.addWidget(self.stopBtn, row = 3, col = 6, colspan = 2)
+
+        #self.boundaryBtn = QtWidgets.QPushButton('Draw Boundary')
+        #self.boundaryStatus = False
+        #self.boundaryBtn.clicked.connect(self.draw_boundary)
+        #self.bdBtn = QtWidgets.QPushButton('Boustrophedon')
+        #self.bdStatus = False
+        #self.bdBtn.clicked.connect(self.boustrophedon)
+        #self.adaptiveBtn = QtWidgets.QPushButton('Adaptive')
+        #self.adaptiveStatus = False
+        #self.adaptiveBtn.clicked.connect(self.adaptive)
+        #self.widget.addWidget(self.boundaryBtn, row = 3, col = 0, colspan = 1)
+        #self.widget.addWidget(self.bdBtn, row = 3, col = 1, colspan = 1)
+        #self.widget.addWidget(self.adaptiveBtn, row = 3, col = 2, colspan = 1)
+
+        self.stopStatus = True
+        self.parking_brake(self.stopStatus)
+        self.parkBtn = QtWidgets.QPushButton('PARK ON')
+        self.parkBtn.setStyleSheet("background-color : red")
+        self.parkBtn.clicked.connect(self.toggle_brake)
+        self.widget.addWidget(self.parkBtn, row = 3, col = 6, colspan = 2)
+
         self.pxrfBtn = QtWidgets.QPushButton('Sample')
         self.pxrfStatus = False
-        self.pxrfBtn.clicked.connect(self.start_pxrf_collection)
-        self.widget.addWidget(self.pxrfBtn, row = 3, col = 3, colspan = 1)
+        self.pxrfBtn.clicked.connect(self.toggle_pxrf_collection)
+        self.widget.addWidget(self.pxrfBtn, row = 2, col = 7, colspan = 1)
 
         #text widget
         self.statusGPS = QtWidgets.QLineEdit()
@@ -282,40 +296,40 @@ class GpsNavigationGui:
         self.statusPxrf.setText('Ready to collect')
         self.statusPxrf.setReadOnly(True)
        
-        self.statusSpeed = QtWidgets.QLineEdit()
-        self.statusSpeed.setText('High Speed')
-        self.statusSpeed.setReadOnly(True)
+        #self.statusSpeed = QtWidgets.QLineEdit()
+        #self.statusSpeed.setText('High Speed')
+        #self.statusSpeed.setReadOnly(True)
 
         #self.status = pg.TextItem('')
         #self.status.setColor(pg.Qt.QtGui.QColor("red"))
         #self.status.setText("testing")
         #self.widget.addWidget(self.status, row = 1, col = 1)
-        self.widget.addWidget(clearHistoryBtn, row=2, col=0)
-        self.widget.addWidget(clearPathBtn, row=2, col=1)
-        self.widget.addWidget(self.editPathBtn, row=2, col=2)
-        self.widget.addWidget(loadPathFileBtn, row=2, col=3)
-        self.widget.addWidget(savePathBtn,row=2, col=4)
-        self.widget.addWidget(self.startPauseBtn,row=2, col=5, colspan=1)
-        self.widget.addWidget(prevGoalBtn, row=2, col=6)
-        self.widget.addWidget(nextGoalBtn, row=2, col=7)
-        self.widget.addWidget(self.statusGPS, row=1, col=0, colspan=5)
-        self.widget.addWidget(self.statusNav, row=1, col=5, colspan=1)
-        self.widget.addWidget(self.statusSpeed, row=1, col=6, colspan=1)
-        self.widget.addWidget(self.statusPxrf, row=1, col=7, colspan=1)
+        self.widget.addWidget(clearHistoryBtn,    row=1, col=3)
+        self.widget.addWidget(clearPathBtn,       row=2, col=0)
+        self.widget.addWidget(self.editPathBtn,   row=2, col=1)
+        self.widget.addWidget(loadPathFileBtn,    row=2, col=2)
+        self.widget.addWidget(savePathBtn,        row=2, col=3)
+        self.widget.addWidget(self.startPauseBtn, row=2, col=5, colspan=1)
+        self.widget.addWidget(prevGoalBtn,        row=1, col=6)
+        self.widget.addWidget(nextGoalBtn,        row=2, col=6)
+        self.widget.addWidget(self.statusGPS,     row=1, col=0, colspan=3)
+        self.widget.addWidget(self.statusNav,     row=1, col=5, colspan=1)
+        #self.widget.addWidget(self.statusSpeed, row=1, col=6, colspan=1)
+        self.widget.addWidget(self.statusPxrf,    row=1, col=7, colspan=1)
         #self.widget.addLabel(text = "Mode: "+ self.statusNav, row = 1, col = 0, colspan = 2 )
         #self.widget.addLabel(text = "GPS: " + self.statusGPS, row = 1, col = 3, colspan = 2 )
         #self.widget.addLabel(text = "PXRF status: " + self.statusPxrf,  row = 1,  col = 5, colspan = 2)
     
-    def speedListener(self, msg):
-        if msg.angular.x == 1:
-            self.highSpeed = True
-            self.statusSpeed.setText("High Speed")
-        elif msg.angular.x == -1:
-            self.highSpeed = False
-            self.statusSpeed.setText("Low Speed")
+    #def speedListener(self, msg):
+    #    if msg.angular.x == 1:
+    #        self.highSpeed = True
+    #        self.statusSpeed.setText("High Speed")
+    #    elif msg.angular.x == -1:
+    #        self.highSpeed = False
+    #        self.statusSpeed.setText("Low Speed")
 
-    def pxrfListener(self, msg):
-        if  msg.data == "201":
+    def pxrfListener(self, result):
+        if  result.data == "201":
             self.pxrfRunning = False
             self.pxrfBtn.setText('Ready to collect')
             self.pxrfStatus = False
@@ -335,10 +349,11 @@ class GpsNavigationGui:
         #self.prev_heading = self. heading
 
     # This function adds points to roi (when user is editing path)
-    def addROIPoint(self,point):
-        print('click')
+    def addROIPoint(self, point):
+        print('click: Add Point')
         if self.editPathMode:
             points = [[handle['pos'].x(),handle['pos'].y()] for handle in self.pathRoi.handles]
+
             points.append(point)
             self.pathRoi.setPoints(points)
     
@@ -350,18 +365,25 @@ class GpsNavigationGui:
             self.pathPlotPoints.append(point)
 
     # This fuction converts the current path from pixels to gps coordinates
-    def pathPoints2GPS(self):
-        self.pathGPS = []
-        for point in self.pathPlotPoints:
+    def pathPoints2GPS(self, pathPlotPoints):
+        pathGPS = []
+        for point in pathPlotPoints:
             gpsPoint = list(self.satMap.pixel2Coord(point))
             gpsPoint.append(1)
-            self.pathGPS.append(gpsPoint)
+            pathGPS.append(gpsPoint)
+        
+        return pathGPS
     
     # This function clears robot's history path
-    def setHistory(self,clear=False):
+    def setHistory(self, clear=False):
         if clear:
             self.historyPoints=[]
-        self.historyPlot.setData(x=[point[0] for point in self.historyPoints],y=[point[1] for point in self.historyPoints])
+            x = []
+            y = []
+        else:
+            x, y = zip(*self.historyPoints)
+
+        self.historyPlot.setData(x=list(x), y=list(y))
     
     # This function clears the current path
     def clearPath(self):
@@ -374,7 +396,7 @@ class GpsNavigationGui:
         self.startPauseBtn.setText('start navigation')
 
     # This function turns on/off editing mode
-    def editPath(self):
+    def toggleEditPathMode(self):
         self.editPathMode = not self.editPathMode
         if self.editPathMode:
             self.editPathBtn.setText('Set Path')
@@ -383,9 +405,13 @@ class GpsNavigationGui:
                 self.addROIPoint(point)
         else:
             self.editPathBtn.setText('Edit Path')
-            self.pathPlotPoints = [[handle['pos'].x(),handle['pos'].y()] for handle in self.pathRoi.handles]
-            self.pathPoints2GPS()
-            self.pathPlot.setData(x=[point[0] for point in self.pathPlotPoints],y=[point[1] for point in self.pathPlotPoints])
+            self.pathPlotPoints = []
+            for handle in self.pathRoi.handles:
+                pos = handle['pos']
+                self.pathPlotPoints.append([pos.x(), pos.y()])
+            self.pathGPS = self.pathPoints2GPS(self.pathPlotPoints)
+            x, y = zip(*self.pathPlotPoints)
+            self.pathPlot.setData(x=list(x), y=list(y))
             self.pathRoi.setPoints([])
             self.updateGoalMarker()
     
@@ -396,7 +422,7 @@ class GpsNavigationGui:
         if fn =='':
             return
         if self.editPathMode:
-            self.editPath()
+            self.toggleEditPathMode()
         self.clearPath()
         csvData = pd.read_csv(fn)
         csvData = np.array(csvData.iloc[:,:])
@@ -451,7 +477,7 @@ class GpsNavigationGui:
             self.currentGoalMarker.setData(x=[],y=[])
 
     # This function is called by subscriber of gps sensor
-    def readOdom(self,data):
+    def readOdom(self,data: Odometry):
         #if (abs(data.pose.pose.position.x - self.prev_lat) < 2 or abs(data.pose.pose.position.y - self.prev_lon) < 2):
         #    lat = data.pose.pose.position.x
         #    #print("lat" + str(lat))
@@ -548,29 +574,42 @@ class GpsNavigationGui:
     def adaptive(self):
         return
 
-    def stop(self):
+    def toggle_brake(self):
+        self.stopStatus = not self.stopStatus
         self.startPauseStatus = 0
-        command = Twist()
-        command.linear.x = 0
-        command.linear.y = 0
-        command.linear.z = 0
-        command.angular.x = 0
-        command.angular.y = 0
-        command.angular.z = 0
-        self.stopCommand.publish(command)
 
-    def start_pxrf_collection(self):
+        self.parking_brake(self.stopStatus)
+        if self.stopStatus:
+            self.parkBtn.setText('PARK ON')
+            self.parkBtn.setStyleSheet("background-color : red")
+        else:
+            self.parkBtn.setText('PARK OFF')
+            self.parkBtn.setStyleSheet("background-color : green")
+
+        #command = Twist()
+        #command.linear.x = 0
+        #command.linear.y = 0
+        #command.linear.z = 0
+        #command.angular.x = 0
+        #command.angular.y = 0
+        #command.angular.z = 0
+        #self.stopCommand.publish(command)
+
+    def toggle_pxrf_collection(self):
         if not self.pxrfStatus:
             self.statusPxrf.setText("Collecting")
             self.pxrfRunning = True
             self.pxrfBtn.setText("STOP pxrf")
-            self.pubCTRL.publish("start")
+            #self.pubCTRL.publish("start")
+            goal = TakeMeasurementGoal()
+            self.pxrf_client.send_goal(goal, done_cb=self.pxrfListener)
             self.pxrfStatus = True
         else:
             self.statusPxrf.setText("Ready to collect")
             self.pxrfRunning = False
             self.pxrfBtn.setText("Sample")
-            self.pubCTRL.publish("stop")
+            #self.pubCTRL.publish("stop")
+            self.pxrf_client.cancel_all_goals()
             self.pxrfStatus = False
 
 
