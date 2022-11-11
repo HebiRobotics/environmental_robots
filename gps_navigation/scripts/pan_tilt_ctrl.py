@@ -193,7 +193,7 @@ def setup_mobile_io(m: 'MobileIO'):
 
     m.set_axis_label(2, 'camera')
     m.set_axis_label(1, '')
-    m.set_axis_label(3, '\u1F4A1')
+    m.set_axis_label(3, '\U0001F4A1')
 
     # Since this value is rescaled -1:1 -> 0:1, set to "0" position to start
     #m.set_axis_value(3, -1.0)
