@@ -2,7 +2,7 @@ import rospy
 import actionlib
 
 from std_msgs.msg import String
-from pxrf.msg import TakeMeasurementAction
+from pxrf.msg import TakeMeasurementAction, TakeMeasurementActionResult
 from std_srvs.srv import SetBool
 
 
@@ -26,24 +26,27 @@ class TakeMeasurementServer:
         self.pxrf_response = 'NoResponse'
         self.should_stop = False
 
-        print('sampling...')
         sample_time = float(rospy.get_param('~sample_time', 2.0))
 
+        print('Starting')
         self.deploy_pxrf(True)
 
         self.cmd_pub.publish(String('start'))
 
+        print('sampling...')
         rospy.Timer(rospy.Duration.from_sec(sample_time), self.stop_sampling, oneshot=True)
         while self.pxrf_response != '201' and not self.should_stop:
             rospy.sleep(0.1)
+        print('Sample Complete!')
 
         if self.pxrf_response != '201':
             self.cmd_pub.publish(String('stop'))
 
         self.deploy_pxrf(False)
+        print('arm stowed')
 
-        print('Sample Complete!')
-        self.server.set_succeeded(self.pxrf_response)
+        result = TakeMeasurementActionResult(self.pxrf_response)
+        self.server.set_succeeded(result)
 
 
 if __name__ == "__main__":
