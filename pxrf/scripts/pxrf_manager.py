@@ -2,7 +2,7 @@ import rospy
 import actionlib
 
 from std_msgs.msg import String
-from pxrf.msg import TakeMeasurementAction, TakeMeasurementActionResult
+from pxrf.msg import TakeMeasurementAction, TakeMeasurementResult
 from std_srvs.srv import SetBool
 
 
@@ -45,7 +45,8 @@ class TakeMeasurementServer:
         self.deploy_pxrf(False)
         print('arm stowed')
 
-        result = TakeMeasurementActionResult(self.pxrf_response)
+        result = TakeMeasurementResult()
+        result.result.data = self.pxrf_response
         self.server.set_succeeded(result)
 
 
