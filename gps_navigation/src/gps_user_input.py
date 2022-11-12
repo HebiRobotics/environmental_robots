@@ -21,7 +21,7 @@ from sensor_msgs.msg import NavSatFix
 from microstrain_inertial_msgs.msg import FilterHeading
 
 import actionlib
-from pxrf.msg import TakeMeasurementAction, TakeMeasurementGoal
+from pxrf.msg import TakeMeasurementAction, TakeMeasurementGoal, TakeMeasurementResult
 
 # add pxrf's plot script to lookup path
 import rospkg
@@ -40,14 +40,41 @@ width_set = 0
 height_set = 0
 #gps_fidelity = 1.0
 
-def deg2num(lat_deg, lon_deg, zoom: int):
+
+class MeasurementMarker(pg.GraphicsObject):
+    def __init__(self, x, y, parent=None):
+        super().__init__(parent)
+        size = 50
+        self._rect = QtCore.QRectF(x - size // 2, y - size // 2, size, size)
+        self.picture = QtGui.QPicture()
+        self._generate_picture()
+
+    @property
+    def rect(self):
+        return self._rect
+
+    def _generate_picture(self):
+        painter = QtGui.QPainter(self.picture)
+        painter.setPen(pg.mkPen("w"))
+        painter.setBrush(pg.mkBrush("g"))
+        painter.drawRect(self.rect)
+        painter.end()
+
+    def paint(self, painter, option, widget=None):
+        painter.drawPicture(0, 0, self.picture)
+
+    def boundingRect(self):
+        return QtCore.QRectF(self.picture.boundingRect())
+
+
+def deg2num(lat_deg: float, lon_deg: float, zoom: int):
     lat_rad = math.radians(lat_deg)
     n = 2.0 ** zoom
     xtile = (lon_deg + 180.0) / 360.0 * n
     ytile = (1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n
     return (xtile, ytile)
 
-def num2deg(xtile, ytile, zoom: int):
+def num2deg(xtile: float, ytile: float, zoom: int):
     n = 2.0 ** zoom
     lon_deg = xtile / n * 360.0 - 180.0
     lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * ytile / n)))
@@ -61,10 +88,10 @@ class TileMap:
         self.load_tiles(coord, dim, zoom)
 
     def load_tiles(self, coord, dim, zoom: int):
-        lon = coord[0]
-        lat = coord[1]
-        width = dim[0]
-        height = dim[1] 
+        lon: float = coord[0]
+        lat: float = coord[1]
+        width: int = dim[0]
+        height: int = dim[1] 
         print(f'Window at Lon: {lon}, Lat: {lat}, W: {width}, H: {height}')
 
         x, y = deg2num(lon, lat, zoom)
@@ -104,8 +131,8 @@ class TileMap:
         y = float(pix[1]) / self.TILE_SIZE_PX + self.y
         return num2deg(x, y, self.zoom)
 
-    def coord2Pixel(self, coord):
-        x,y = deg2num(coord[0], coord[1], self.zoom)
+    def coord2Pixel(self, lat: float, lon: float):
+        x,y = deg2num(lat, lon, self.zoom)
         x = round(self.TILE_SIZE_PX * (x-self.x))
         y = round(self.TILE_SIZE_PX * (y-self.y))
         return x, y
@@ -134,15 +161,19 @@ class TileMap:
 
 
 class PlotWithClick(pg.PlotItem):
+
     def mouseClickEvent(self, ev):
         xClick = self.getViewBox().mapSceneToView(ev.scenePos()).x()
         yClick = self.getViewBox().mapSceneToView(ev.scenePos()).y()
-        self.addROIPoint([xClick, yClick])
+        for handler in self.click_handlers:
+            handler([xClick, yClick])
 
 
 class PolyLineROI_noHover(pg.PolyLineROI):
     def hoverEvent(self, ev):
         pass
+
+
 
 
 class GpsNavigationGui:
@@ -153,12 +184,12 @@ class GpsNavigationGui:
 
         #pxrf control
         self.pxrfRunning = False
-        
+
         #speed display
         self.highSpeed = True
 
         #get the map
-        self.satMap = TileMap(coord=(lat,lon), dim=(width,height), zoom=zoom)
+        self.satMap = TileMap(coord=(lat, lon), dim=(width, height), zoom=zoom)
 
         # init widget
         pg.setConfigOption('imageAxisOrder', 'row-major')
@@ -166,7 +197,7 @@ class GpsNavigationGui:
 
         # add plot for map
         satGUI = pg.GraphicsLayoutWidget()
-        self.widget.addWidget(satGUI,row=0,col=0,colspan=8)
+        self.widget.addWidget(satGUI, row=0, col=0, colspan=8)
         satGUI.setBackground('w')
         self.click_plot = PlotWithClick()
         satGUI.addItem(self.click_plot)
@@ -175,9 +206,27 @@ class GpsNavigationGui:
         img = pg.ImageItem(self.satMap.map_array)
         img.setBorder({'color': 'b', 'width': 3})
         self.click_plot.addItem(img)
-        self.click_plot.showAxes(False)
+        self.click_plot.showAxes(True)
         self.click_plot.setAspectLocked()
         self.click_plot.invertY()
+
+        with open('measurement_locations.csv') as f:
+            reader = csv.reader(f)
+            self.num_measurements = 0
+            for row in reader:
+                self.num_measurements += 1
+                label = row[0]
+                lat = float(row[1])
+                lon = float(row[2])
+                self.add_marker_at(lat, lon, label=label)
+
+        #with open('coords_wgs84.csv') as f:
+        #    reader = csv.reader(f)
+        #    for row in reader:
+        #        label = row[0]
+        #        x = float(row[1])
+        #        y = float(row[2])
+        #        self.add_marker_at(x, y, label=label)
 
         # add arrow to show robot
         self.robotArrow = pg.ArrowItem(headLen=40, tipAngle=30, brush='r')
@@ -185,27 +234,29 @@ class GpsNavigationGui:
 
         # init ROI for editing path
         self.pathRoi = PolyLineROI_noHover([], closed=False)
+
+        # init waypoints display
         self.click_plot.addItem(self.pathRoi)
 
         # init plot for path
-        self.pathPlotPoints = []
+        self.pathPlotPoints: list[list] = []
         self.pathGPS = []
         self.heading = 0
-        self.pathPlot = self.click_plot.plot(symbolBrush=(255,0,255))
-        self.currentGoalMarker = self.click_plot.plot(symbolBrush=(0,0,255))
+        self.pathPlot = self.click_plot.plot(symbolBrush=(255, 0, 255))
+        self.currentGoalMarker = self.click_plot.plot(symbolBrush=(0, 0, 255))
         self.pathIndex = 0
 
         # interaction for adding path points
-        self.click_plot.addROIPoint = self.addROIPoint
+        self.click_plot.click_handlers = [self.addROIPoint]
 
         # robot's history (path measured by gps)
         self.historyPoints: list[list[int]] = []
-        self.historyPlot = self.click_plot.plot(pen=pg.mkPen('g',width=3))
+        self.historyPlot = self.click_plot.plot(pen=pg.mkPen('g', width=3))
         self.setHistory()
 
         # ros services
         self.parking_brake = rospy.ServiceProxy('/parking_brake', SetBool)
-        
+
         # add buttons
         self.setup_widgets()
 
@@ -213,18 +264,23 @@ class GpsNavigationGui:
         self.pxrf_client = actionlib.SimpleActionClient('/take_measurement', TakeMeasurementAction)
 
         # ros sub pub
-        self.odom_sub = rospy.Subscriber('/nav/odom', Odometry, self.readOdom) # plotRobotPosition
-        self.navigation_sub = rospy.Subscriber('/gps_navigation/current_goal', PoseStamped, self.readNavigation) # get status of navigation controller
+        #self.navigation_sub = rospy.Subscriber('/gps_navigation/current_goal', PoseStamped, self.readNavigation) # get status of navigation controller
         self.goal_pub = rospy.Publisher('/gps_navigation/goal', PoseStamped, queue_size=5)
-        self.location_sub = rospy.Subscriber('/gnss1/fix', NavSatFix, self.location)
-        self.heading_sub = rospy.Subscriber('/nav/heading', FilterHeading, self.set_heading)
 
-        #self.pubCTRL = rospy.Publisher('pxrf_cmd', String, queue_size=2)
-        #self.subCTRL = rospy.Subscriber('pxrf_response', String, self.pxrfListener)
+        self.location_sub = rospy.Subscriber('/gnss1/fix', NavSatFix, self.on_gps_update)
+        #self.heading_sub = rospy.Subscriber('/nav/heading', FilterHeading, self.on_heading_update)
+        self.odom_sub = rospy.Subscriber('/nav/odom_throttle', Odometry, self.on_odom_update) # plotRobotPosition
 
-        #self.speedRead = rospy.Subscriber('/motor_controller/command', Twist, self.speedListener)
+    def add_marker_at(self, lat: float, lon: float, label=None, size=20):
+        pos = self.satMap.coord2Pixel(lat, lon)
 
-        #self.stopCommand = rospy.Publisher('/cmd_vel/managed', Twist, queue_size=5)
+        marker = pg.TargetItem(
+            pos=pos,
+            movable=False,
+            size=size,
+            label=label)
+
+        self.click_plot.addItem(marker)
 
     def setup_widgets(self):
 
@@ -249,39 +305,24 @@ class GpsNavigationGui:
         savePathBtn = QtWidgets.QPushButton('Save Path')
         savePathBtn.clicked.connect(self.savePath)
         self.startPauseBtn = QtWidgets.QPushButton('Start Navigation')
-        self.startPauseStatus = False
+        self.is_navigating = False
         self.startPauseBtn.clicked.connect(self.startPause)
         prevGoalBtn = QtWidgets.QPushButton('Prev Goal')
         prevGoalBtn.clicked.connect(prevGoal)
         nextGoalBtn = QtWidgets.QPushButton('Next Goal')
         nextGoalBtn.clicked.connect(nextGoal)
         
-        #second row of buttons
-
-        #self.boundaryBtn = QtWidgets.QPushButton('Draw Boundary')
-        #self.boundaryStatus = False
-        #self.boundaryBtn.clicked.connect(self.draw_boundary)
-        #self.bdBtn = QtWidgets.QPushButton('Boustrophedon')
-        #self.bdStatus = False
-        #self.bdBtn.clicked.connect(self.boustrophedon)
-        #self.adaptiveBtn = QtWidgets.QPushButton('Adaptive')
-        #self.adaptiveStatus = False
-        #self.adaptiveBtn.clicked.connect(self.adaptive)
-        #self.widget.addWidget(self.boundaryBtn, row = 3, col = 0, colspan = 1)
-        #self.widget.addWidget(self.bdBtn, row = 3, col = 1, colspan = 1)
-        #self.widget.addWidget(self.adaptiveBtn, row = 3, col = 2, colspan = 1)
-
         self.stopStatus = True
         self.parking_brake(self.stopStatus)
         self.parkBtn = QtWidgets.QPushButton('PARK ON')
         self.parkBtn.setStyleSheet("background-color : red")
         self.parkBtn.clicked.connect(self.toggle_brake)
-        self.widget.addWidget(self.parkBtn, row = 3, col = 6, colspan = 2)
+        self.widget.addWidget(self.parkBtn, row=3, col=6, colspan=2)
 
-        self.pxrfBtn = QtWidgets.QPushButton('Sample')
         self.pxrfStatus = False
+        self.pxrfBtn = QtWidgets.QPushButton('Sample')
         self.pxrfBtn.clicked.connect(self.toggle_pxrf_collection)
-        self.widget.addWidget(self.pxrfBtn, row = 2, col = 7, colspan = 1)
+        self.widget.addWidget(self.pxrfBtn, row=2, col=7, colspan=1)
 
         #text widget
         self.statusGPS = QtWidgets.QLineEdit()
@@ -295,10 +336,6 @@ class GpsNavigationGui:
         self.statusPxrf = QtWidgets.QLineEdit()
         self.statusPxrf.setText('Ready to collect')
         self.statusPxrf.setReadOnly(True)
-       
-        #self.statusSpeed = QtWidgets.QLineEdit()
-        #self.statusSpeed.setText('High Speed')
-        #self.statusSpeed.setReadOnly(True)
 
         #self.status = pg.TextItem('')
         #self.status.setColor(pg.Qt.QtGui.QColor("red"))
@@ -319,53 +356,56 @@ class GpsNavigationGui:
         #self.widget.addLabel(text = "Mode: "+ self.statusNav, row = 1, col = 0, colspan = 2 )
         #self.widget.addLabel(text = "GPS: " + self.statusGPS, row = 1, col = 3, colspan = 2 )
         #self.widget.addLabel(text = "PXRF status: " + self.statusPxrf,  row = 1,  col = 5, colspan = 2)
-    
-    #def speedListener(self, msg):
-    #    if msg.angular.x == 1:
-    #        self.highSpeed = True
-    #        self.statusSpeed.setText("High Speed")
-    #    elif msg.angular.x == -1:
-    #        self.highSpeed = False
-    #        self.statusSpeed.setText("Low Speed")
 
-    def pxrfListener(self, result):
-        if  result.data == "201":
-            self.pxrfRunning = False
-            self.pxrfBtn.setText('Ready to collect')
-            self.pxrfStatus = False
+    def on_pxrf_measurement_complete(self, status, result: TakeMeasurementResult):
+        print(f'pxrf cb result: {result.result.data}')
+        self.pxrfRunning = False
+        self.pxrfBtn.setText('Sample')
+        self.statusPxrf.setText("Ready to collect")
+        self.pxrfStatus = False
+
+        self.num_measurements += 1
+        with open('measurement_locations.csv', 'a') as f:
+            f.write(f'Sample{self.num_measurements},{self.prev_lat},{self.prev_lon}\n')
+
+        self.add_marker_at(self.prev_lat, self.prev_lon, f'Sample#{self.num_measurements}')
+
+        if result.result.data == "201":
             generate_plot()
 
-
     #This function sets the heading of the robot
-    def set_heading(self, data):
+    def on_heading_update(self, data: FilterHeading):
         #if abs(self.prev_heading - self.heading) < 0.5:
         #    self.heading = data.heading_rad
         #else:
         #    self.heading = self.prev_heading
         if(data.heading_rad == 0 and data.heading_deg == 0):
             return
+        print('heading update')
         self.heading = data.heading_rad 
 
         #self.prev_heading = self. heading
 
     # This function adds points to roi (when user is editing path)
     def addROIPoint(self, point):
-        print('click: Add Point')
         if self.editPathMode:
+            print('click: Add Point')
             points = [[handle['pos'].x(),handle['pos'].y()] for handle in self.pathRoi.handles]
 
             points.append(point)
             self.pathRoi.setPoints(points)
     
     # This function converts the current path from gps coordinates to pixels
-    def pathGPS2points(self):
+    def gps_to_pixels(self):
         self.pathPlotPoints = []
         for gpsPoint in self.pathGPS:
-            point = list(self.satMap.coord2Pixel(gpsPoint[0:2]))
+            lat = gpsPoint[0]
+            lon = gpsPoint[1]
+            point = list(self.satMap.coord2Pixel(lat, lon))
             self.pathPlotPoints.append(point)
 
     # This fuction converts the current path from pixels to gps coordinates
-    def pathPoints2GPS(self, pathPlotPoints):
+    def pixels_to_gps(self, pathPlotPoints):
         pathGPS = []
         for point in pathPlotPoints:
             gpsPoint = list(self.satMap.pixel2Coord(point))
@@ -378,6 +418,8 @@ class GpsNavigationGui:
     def setHistory(self, clear=False):
         if clear:
             self.historyPoints=[]
+        
+        if len(self.historyPoints) == 0:
             x = []
             y = []
         else:
@@ -390,16 +432,16 @@ class GpsNavigationGui:
         self.pathRoi.setPoints([])
         self.pathPlotPoints= []
         self.pathGPS = []
-        self.pathPlot.setData(x=[],y=[])
+        self.pathPlot.setData(x=[], y=[])
         self.updateGoalMarker()
-        self.startPauseStatus = False
+        self.is_navigating = False
         self.startPauseBtn.setText('start navigation')
 
     # This function turns on/off editing mode
     def toggleEditPathMode(self):
         self.editPathMode = not self.editPathMode
         if self.editPathMode:
-            self.editPathBtn.setText('Set Path')
+            self.editPathBtn.setText('Apply')
             self.pathRoi.setPoints([])
             for point in self.pathPlotPoints:
                 self.addROIPoint(point)
@@ -409,7 +451,7 @@ class GpsNavigationGui:
             for handle in self.pathRoi.handles:
                 pos = handle['pos']
                 self.pathPlotPoints.append([pos.x(), pos.y()])
-            self.pathGPS = self.pathPoints2GPS(self.pathPlotPoints)
+            self.pathGPS = self.pixels_to_gps(self.pathPlotPoints)
             x, y = zip(*self.pathPlotPoints)
             self.pathPlot.setData(x=list(x), y=list(y))
             self.pathRoi.setPoints([])
@@ -432,7 +474,7 @@ class GpsNavigationGui:
                 toStop = bool(csvData[i,2])
             gpsPoint = [csvData[i,0],csvData[i,1],toStop]
             self.pathGPS.append(gpsPoint)
-        self.pathGPS2points()
+        self.gps_to_pixels()
         self.pathPlot.setData(x=[point[0] for point in self.pathPlotPoints],y=[point[1] for point in self.pathPlotPoints])
         self.changeGoal(reset=True)
 
@@ -449,8 +491,8 @@ class GpsNavigationGui:
     def startPause(self):
         if (len(self.pathGPS) == 0):
             return
-        self.startPauseStatus = not self.startPauseStatus
-        if self.startPauseStatus:
+        self.is_navigating = not self.is_navigating
+        if self.is_navigating:
             self.startPauseBtn.setText('Pause Navigation')
         elif self.pathIndex == 0:
             self.startPauseBtn.setText('Start Navigation')
@@ -464,7 +506,7 @@ class GpsNavigationGui:
             self.pathIndex = max(self.pathIndex+len(self.pathPlotPoints), 0)
         if reset or self.pathIndex >= len(self.pathPlotPoints):
             self.pathIndex = 0
-            if self.startPauseStatus:
+            if self.is_navigating:
                 self.startPause()
         self.updateGoalMarker()
 
@@ -472,47 +514,20 @@ class GpsNavigationGui:
     def updateGoalMarker(self):
         if self.pathIndex < len(self.pathPlotPoints):
             point = self.pathPlotPoints[self.pathIndex]
-            self.currentGoalMarker.setData(x=[point[0]],y=[point[1]])
+            self.currentGoalMarker.setData(x=[point[0]], y=[point[1]])
         else:
-            self.currentGoalMarker.setData(x=[],y=[])
+            self.currentGoalMarker.setData(x=[], y=[])
 
     # This function is called by subscriber of gps sensor
-    def readOdom(self,data: Odometry):
-        #if (abs(data.pose.pose.position.x - self.prev_lat) < 2 or abs(data.pose.pose.position.y - self.prev_lon) < 2):
-        #    lat = data.pose.pose.position.x
-        #    #print("lat" + str(lat))
-        #    lon = data.pose.pose.position.y
-        #else:
-        #    lat = self.prev_lat
-        #    lon = self.prev_lon
-
+    def on_odom_update(self,data: Odometry):
+        print('Incoming Odom')
         lat = data.pose.pose.position.x
         lon = data.pose.pose.position.y
 
         #calculate heading based on gps coordinates 
-        pixX, pixY = self.satMap.coord2Pixel([lat, lon])
+        pixX, pixY = self.satMap.coord2Pixel(lat, lon)
         #print(f"GPS -> pixels ({lat}, {lon}) -> {pixX}, {pixY}")
-        prevpixX, prevpixY = self.satMap.coord2Pixel([self.prev_lat, self.prev_lon])
-        #
-        #run = pixX - prevpixX
-        ##print(run)
-        #rise = pixY - prevpixY
-        ##print(rise)
-        ##only calculate heading when the robot has moved 2 meters
-        #dist = np.sqrt((self.prev_lat - lat) ** 2.0 + (self.prev_lon - lon) ** 2.0)
-        #if True: #dist > 4e-5 :
-        #    #print("enter loop1")
-        #    if run < 0:
-        #        calcHeading = -(np.pi/4.0 - math.atan2(rise, run))
-        #        print("loop2")
-        #    elif run > 0:
-        #        calcHeading = np.pi/4.0 - math.atan2(rise,run) 
-        #    elif run == 0:
-        #        calcHeading = np.pi/2.0
-        #else:
-        #    calcHeading = self.prev_heading
-        ##print("calcHeading "+ str(calcHeading) )
-        #robotHeading = calcHeading * (1 - gps_fidelity) + self.heading * gps_fidelity
+        prevpixX, prevpixY = self.satMap.coord2Pixel(self.prev_lat, self.prev_lon)
         robotHeading = self.heading
         #print("robotHeading "+ str(robotHeading))
         quat = data.pose.pose.orientation
@@ -520,10 +535,12 @@ class GpsNavigationGui:
         #xVec = r.as_dcm()[:,0]
         #robotHeading = np.mod(math.atan2(xVec[1],xVec[0])+np.pi/3.0,2*np.pi)
         #robotHeading = self.heading #math.atan2(xVec[0],xVec[1])
+
         if not self.robotArrow is None:
             self.robotArrow.setStyle(angle = robotHeading*180.0/np.pi + 90.0)
             self.robotArrow.setPos(pixX, pixY)
             self.robotArrow.update()
+
         self.historyPoints.append([pixX, pixY])
         self.setHistory()
         self.prev_lat = lat
@@ -531,7 +548,7 @@ class GpsNavigationGui:
         self.prev_heading = robotHeading
     
     # This function updates the value of longitude and latitude information
-    def location(self, data):
+    def on_gps_update(self, data: NavSatFix):
         if(data.longitude != 0.0 and data.latitude != 0.0):
             self.longitude = data.longitude
             self.latitude = data.latitude
@@ -540,8 +557,9 @@ class GpsNavigationGui:
             self.statusGPS.setText("GPS connecting")
 
     #this function checks status of navigation controller
-    def readNavigation(self,data):
-        if self.startPauseStatus:
+    def readNavigation(self,data: PoseStamped):
+        print('Incoming nav update')
+        if self.is_navigating:
             self.statusNav.setText("Automatic navigation")
             currNavGoal = np.array([data.pose.position.y, data.pose.position.x])
             desNavGoal = np.array(self.pathGPS[self.pathIndex][0:2])
@@ -565,18 +583,9 @@ class GpsNavigationGui:
             msg.pose.position.z = -1
             self.goal_pub.publish(msg)
 
-    def boustrophedon(self):
-        return
-
-    def draw_boundary(self):
-        return
-
-    def adaptive(self):
-        return
-
     def toggle_brake(self):
         self.stopStatus = not self.stopStatus
-        self.startPauseStatus = 0
+        self.is_navigating = 0
 
         self.parking_brake(self.stopStatus)
         if self.stopStatus:
@@ -586,31 +595,21 @@ class GpsNavigationGui:
             self.parkBtn.setText('PARK OFF')
             self.parkBtn.setStyleSheet("background-color : green")
 
-        #command = Twist()
-        #command.linear.x = 0
-        #command.linear.y = 0
-        #command.linear.z = 0
-        #command.angular.x = 0
-        #command.angular.y = 0
-        #command.angular.z = 0
-        #self.stopCommand.publish(command)
-
     def toggle_pxrf_collection(self):
-        if not self.pxrfStatus:
+        self.pxrfStatus = not self.pxrfStatus
+        if self.pxrfStatus:
             self.statusPxrf.setText("Collecting")
             self.pxrfRunning = True
             self.pxrfBtn.setText("STOP pxrf")
             #self.pubCTRL.publish("start")
             goal = TakeMeasurementGoal()
-            self.pxrf_client.send_goal(goal, done_cb=self.pxrfListener)
-            self.pxrfStatus = True
+            self.pxrf_client.send_goal(goal, done_cb=self.on_pxrf_measurement_complete)
         else:
             self.statusPxrf.setText("Ready to collect")
             self.pxrfRunning = False
             self.pxrfBtn.setText("Sample")
             #self.pubCTRL.publish("stop")
             self.pxrf_client.cancel_all_goals()
-            self.pxrfStatus = False
 
 
 if __name__ == '__main__':
