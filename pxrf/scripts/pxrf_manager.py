@@ -33,7 +33,7 @@ class TakeMeasurementServer:
 
         self.cmd_pub.publish(String('start'))
 
-        rospy.Timer(sample_time, self.stop_sampling, oneshot=True)
+        rospy.Timer(rospy.Duration.from_sec(sample_time), self.stop_sampling, oneshot=True)
         while self.pxrf_response != '201' and not self.should_stop:
             rospy.sleep(0.1)
 
