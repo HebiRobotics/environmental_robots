@@ -28,8 +28,9 @@ class TakeMeasurementServer:
 
         sample_time = float(rospy.get_param('~sample_time', 2.0))
 
-        print('Starting')
+        print('deploying arm')
         self.deploy_pxrf(True)
+        rospy.sleep(2)
 
         self.cmd_pub.publish(String('start'))
 
@@ -43,6 +44,7 @@ class TakeMeasurementServer:
             self.cmd_pub.publish(String('stop'))
 
         self.deploy_pxrf(False)
+        rospy.sleep(2)
         print('arm stowed')
 
         result = TakeMeasurementResult()
