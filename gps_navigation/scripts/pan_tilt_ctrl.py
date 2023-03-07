@@ -93,7 +93,8 @@ class HebiCameraMast:
 
 class MastControlState(Enum):
     STARTUP = auto()
-    HOMING = auto()
+    HOME_FRONT = auto()
+    HOME_REAR = auto()
     TELEOP = auto()
     DISCONNECTED = auto()
     EXIT = auto()
@@ -101,13 +102,15 @@ class MastControlState(Enum):
 class MastInputs:
     v_pan: float
     v_tilt: float
-    home: bool
+    home_front: bool
+    home_rear: bool
     flood_light: float
 
-    def __init__(self, sliders: 'list[float]', home: bool, flood: float):
+    def __init__(self, sliders: 'list[float]', home_front: bool, home_rear: bool, flood: float):
         self.pan = sliders[0]
         self.tilt = sliders[1]
-        self.home = home
+        self.home_front = home_front
+        self.home_rear = home_rear
         self.flood_light = flood
 
 
@@ -115,14 +118,15 @@ class MastControl:
     PAN_SCALING = 0.5
     TILT_SCALING = -0.5
 
-    def __init__(self, camera_mast: HebiCameraMast, camera: HebiCamera, home_pose=[0, 0]):
+    def __init__(self, camera_mast: HebiCameraMast, camera: HebiCamera, front_pose=[0, 0], rear_pose=[0, 0]):
         self.state = MastControlState.STARTUP
         self.mast = camera_mast
         self.camera = camera
 
         self.last_input_time = time()
 
-        self.home_pose = home_pose
+        self.home_front = front_pose
+        self.home_rear = rear_pose
 
     @property
     def running(self):
@@ -145,18 +149,20 @@ class MastControl:
         if self.state is self.state.DISCONNECTED:
             self.transition_to(t_now, self.state.TELEOP)
 
-        self.camera.flood_light = inputs.flood_light
+        self.camera.spot_light = inputs.flood_light
 
         if self.state is self.state.STARTUP:
-            self.transition_to(t_now, self.state.HOMING)
+            self.transition_to(t_now, self.state.HOME_FRONT)
 
-        elif self.state is self.state.HOMING:
+        elif self.state is self.state.HOME_FRONT or self.state is self.state.HOME_REAR:
             if t_now > self.mast.trajectory.end_time:
                 self.transition_to(t_now, self.state.TELEOP)
 
         elif self.state is self.state.TELEOP:
-            if inputs.home:
-                self.transition_to(t_now, self.state.HOMING)
+            if inputs.home_front:
+                self.transition_to(t_now, self.state.HOME_FRONT)
+            elif inputs.home_rear:
+                self.transition_to(t_now, self.state.HOME_REAR)
             else:
                 Δpan  = inputs.pan * self.PAN_SCALING
                 Δtilt = inputs.tilt * self.TILT_SCALING
@@ -173,9 +179,13 @@ class MastControl:
             self.mast.trajectory = None
             self.mast.cmd.velocity = None
 
-        elif new_state is self.state.HOMING:
-            print("Transitioning to Homing")
-            self.mast.set_position(t_now, 3.0, self.home_pose)
+        elif new_state is self.state.HOME_FRONT:
+            print("Transitioning to Homing (Front)")
+            self.mast.set_position(t_now, 3.0, self.home_front)
+
+        elif new_state is self.state.HOME_REAR:
+            print("Transitioning to Homing (Rear)")
+            self.mast.set_position(t_now, 3.0, self.home_rear)
 
         elif new_state is self.state.TELEOP:
             print("Transitioning to Manual Control")
@@ -187,16 +197,17 @@ class MastControl:
 
 
 def setup_mobile_io(m: 'MobileIO'):
-    m.set_button_label(1, '⟲')
+    m.set_button_label(1, 'view')
+    m.set_button_mode(1, 1)
     m.set_button_label(2, 'light')
     m.set_button_mode(2, 1)
 
-    m.set_axis_label(2, 'camera')
-    m.set_axis_label(1, '')
-    m.set_axis_label(3, '\U0001F4A1')
+    #m.set_axis_label(2, 'camera')
+    #m.set_axis_label(1, '')
+    m.set_axis_label(4, '\U0001F4A1')
 
     # Since this value is rescaled -1:1 -> 0:1, set to "0" position to start
-    #m.set_axis_value(3, -1.0)
+    m.set_axis_value(4, -1.0)
 
 
 def parse_mobile_feedback(m: 'MobileIO'):
@@ -206,12 +217,19 @@ def parse_mobile_feedback(m: 'MobileIO'):
     # Update Camera light
     flood_light = 0.0
     if m.get_button_state(2):
-        flood_light = (m.get_axis_state(3) + 1.0) / 2.0
+        flood_light = (m.get_axis_state(4) + 1.0) / 2.0
 
-    pan  = -1.0 * m.get_axis_state(1)
-    tilt = m.get_axis_state(2)
+    pan  = 0.0 #-1.0 * m.get_axis_state(1)
+    tilt = 0.0 #m.get_axis_state(2)
 
-    return MastInputs([pan, tilt], m.get_button_state(1), flood=flood_light)
+    home_front = False
+    home_rear = False
+    if m.get_button_diff(1) == 1:
+        home_rear = True
+    elif m.get_button_diff(1) == -1:
+        home_front = True
+
+    return MastInputs([pan, tilt], home_front, home_rear, flood=flood_light)
 
 
 if __name__ == "__main__":
@@ -219,7 +237,7 @@ if __name__ == "__main__":
     sleep(2)
 
     # Setup Camera Pan/Tilt
-    family = "Chevron"
+    family = "PanTiltCam"
     module_names = ['C1_pan', 'C2_tilt']
 
     group = lookup.get_group_from_names(family, module_names)
@@ -228,32 +246,33 @@ if __name__ == "__main__":
         sleep(1)
         group = lookup.get_group_from_names(family, module_names)
 
-    cam_group = lookup.get_group_from_names('Chevron', ['Widey'])
+    cam_group = lookup.get_group_from_names('PanTiltCam', ['Widey'])
     while cam_group is None:
         print('Looking for camera...')
         sleep(1)
-        cam_group = lookup.get_group_from_names('Chevron', ['Widey'])
+        cam_group = lookup.get_group_from_names('PanTiltCam', ['Widey'])
     
     mast = HebiCameraMast(group)
     camera = HebiCamera(cam_group)
 
     # Setup MobileIO
     print('Looking for Mobile IO...')
-    m = create_mobile_io(lookup, family)
+    m = create_mobile_io(lookup, 'Chevron')
     while m is None:
         print('Waiting for Mobile IO device to come online...')
         sleep(1)
-        m = create_mobile_io(lookup, family)
+        m = create_mobile_io(lookup, 'Chevron')
 
     m.update()
     setup_mobile_io(m)
     
-    mast_control = MastControl(mast, camera, home_pose=[-1.57, -1.57])
+    mast_control = MastControl(mast, camera, front_pose=[-0.7, 2.2], rear_pose=[0.55, 4.15])
 
     #######################
     ## Main Control Loop ##
     #######################
     
+    cmd = hebi.GroupCommand(1)
     while mast_control.running:
         t = time()
         inputs = parse_mobile_feedback(m)
@@ -261,8 +280,8 @@ if __name__ == "__main__":
         # Update mobileIO stream angle
         if inputs:
             # pi rad offset needed for wide angle cameras
-            m._cmd.io.c.set_float(1, mast_control.camera.roll + np.pi)
-            m._group.send_command(m._cmd)
+            cmd.io.c.set_float(1, mast_control.camera.roll + np.pi)
+            m._group.send_command(cmd)
 
         mast_control.send()
         camera.send()

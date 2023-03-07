@@ -1,0 +1,85 @@
+<?xml version="1.0"?>
+<motor_driver xmlns:xi="http://www.w3.org/2001/XInclude">
+
+    <motor
+            pole_pairs="5"
+            speed_constant="300.0"
+            torque_constant="26.7/1000.0"
+            max_winding_current="80.0"
+            max_motor_speed="12000"
+            max_winding_temperature="125"
+            winding_resistance="0.07"
+            winding_inductance="0.000060"
+            torque_temp_constant="nan"
+            velocity_temp_constant="nan"
+    />
+
+    <thermal_model
+            housing_thermal_resistance="2.27"
+            winding_thermal_resistance="8.17/5.0"
+            housing_thermal_time_const="1020.0/5.0"
+            winding_thermal_time_const="24.5"
+            temperature_source="SENSOR"
+            model_start_percentage="0.5"
+    />
+
+    <controller mode="BLOCK_COMMUTATION">
+    </controller>
+
+    <encoders 
+        motor_encoder="HALLS" 
+        output_encoder="NONE" 
+        deflection_encoder="NONE" 
+        torque_source="CURRENT_ESTIMATE">
+        <hall_switches 
+            direction="REVERSE" 
+            absolute="true" 
+            ticks_per_revolution="60.0" 
+            position_filter_size="1.0" 
+            velocity_filter_size="1.0"
+        />
+        <encoder_a1 type="NONE" calibration_type="NONE"/>
+        <encoder_a2 type="NONE" calibration_type="NONE"/>
+        <encoder_b1 
+            type="QUADRATURE" 
+            calibration_type="NONE" 
+            direction="REVERSE" 
+            absolute="false" 
+            ticks_per_revolution="8000.0" 
+            position_filter_size="1.0" 
+            velocity_filter_size="1.0"
+        />
+        <encoder_b2 type="NONE" calibration_type="NONE"/>
+    </encoders>
+
+    <board 
+        min_duty_cycle="0.05" 
+        max_duty_cycle="0.95" 
+        max_board_current="50.0" 
+        switching_frequency_hz="97660.0" 
+        current_sense_threshold_vds="880.0" 
+        current_sense_threshold_winding="200.0" 
+        current_sense_gain="40.0" 
+        current_filter_size="10.0" 
+        control_divider="8" 
+        winding_order="CBA" 
+        hall_order="ABC"
+    />
+
+    <board_calibration 
+        offset_i_a="nan" 
+        offset_i_b="nan" 
+        offset_i_c="nan" 
+        offset_i_bus="nan" 
+        offset_v_a="0.0" 
+        offset_v_b="0.0" 
+        offset_v_c="0.0"
+    />
+
+    <gear_train 
+        gear_ratio_numerator="100" 
+        gear_ratio_denominator="1"
+        efficiency="0.7" 
+        max_output_torque="0.0"
+    />
+</motor_driver>

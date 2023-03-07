@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- For documentation on the HEBI Robot Configuration please visit: -->
+<!-- https://github.com/HebiRobotics/hebi-hrdf/blob/master/FORMAT.md -->
+
+<!-- Chevron Scoop Arm -->
+<robot version="1.2.0">
+  <actuator type="R8-16"/>
+  <bracket type="R8HeavyRightInside"/>
+  <actuator type="R8-16"/>
+  <link type="R8" extension="0.325" twist="pi"/>
+  <actuator type="R8-16"/>
+  <link type="R8" extension="0.325" twist="pi"/>
+  <actuator type="R8-9"/>
+  
+  <!-- For custom end-effector parameters and formatting please visit: -->
+  <!-- https://github.com/HebiRobotics/hebi-hrdf/blob/master/FORMAT.md#end-effector -->
+  <end-effector type="Custom" mass="0.15" com_trans="0.040 0 0.020" output_trans="0.080 0 0.040" output_rot="Ry(pi/2)"/>
+  
+</robot>
