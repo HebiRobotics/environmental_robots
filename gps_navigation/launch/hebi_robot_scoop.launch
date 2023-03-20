@@ -15,6 +15,7 @@
     <node name="pan_tilt_ctrl" pkg="gps_navigation" type="pan_tilt_ctrl.py" />
     <node name="auger_ctrl" pkg="gps_navigation" type="auger_ctrl.py" />
     <node name="scoop_ctrl" pkg="gps_navigation" type="scoop_ctrl.py" />
+    <node name="color_ctrl" pkg="gps_navigation" type="color_ctrl.py" />
 
     <node name="routine_manager" pkg="gps_navigation" type="routine_manager.py" />
 

@@ -132,9 +132,9 @@ if __name__ == '__main__':
                         pos_obj,
                         output=target_joints)
 
-                scoop_arm.pending_command.led.clear()
+                scoop_arm.pending_command.led.color = 'transparent'
             else:
-                scoop_arm.pending_command.led = 'orange'
+                scoop_arm.pending_command.led.color = 'magenta'
 
             # offset scoop angle based on gravity vector
             o = scoop_arm.last_feedback[3].orientation
@@ -144,7 +144,7 @@ if __name__ == '__main__':
             x_l = R.from_quat(o).as_matrix()[:, 0]
             # get angle from level
             theta = math.acos(x_l @ [0, 0, -1])
-            print(f'Theta offset: {np.rad2deg(theta)}')
+            #print(f'Theta offset: {np.rad2deg(theta)}')
 
             target_joints[3] = scoop_delta.angular.z - theta + np.pi/12
             #print(target_joints)
