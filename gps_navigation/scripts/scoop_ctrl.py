@@ -80,23 +80,23 @@ if __name__ == '__main__':
     rospy.Service('deploy_scoop', SetBool, scoop_cb)
 
     # -0.35 to 0 (low to high)
-    scoop_offset = Twist()
-    prev_scoop_offset = Twist()
-    def scoop_cb(msg):
-        global scoop_offset
-        scoop_offset = msg
+    scoop_delta = Twist()
 
-    rospy.Subscriber('scoop_pose_offset', Twist, scoop_cb)
+    def scoop_delta_cb(msg):
+        global scoop_delta
+        scoop_delta = msg
+
+    rospy.Subscriber('scoop_pose_delta', Twist, scoop_delta_cb)
 
     target_joints = np.empty(scoop_arm.size, dtype=np.float64)
 
     while not rospy.is_shutdown():
         scoop_arm.update()
 
-        diff_x = scoop_offset.linear.x != prev_scoop_offset.linear.x
-        diff_y = scoop_offset.linear.y != prev_scoop_offset.linear.y
-        diff_z = scoop_offset.linear.z != prev_scoop_offset.linear.z
-        diff_theta = scoop_offset.angular.z != prev_scoop_offset.angular.z
+        diff_x = scoop_delta.linear.x != 0.0
+        diff_y = scoop_delta.linear.y != 0.0
+        diff_z = scoop_delta.linear.z != 0.0
+        diff_theta = scoop_delta.angular.z != 0.0
 
         if not stow_complete:
             pass
@@ -112,30 +112,29 @@ if __name__ == '__main__':
             scoop_srv_called = False
 
         elif scoop_deploy and (diff_x or diff_y or diff_z or diff_theta):
-            new_xyz = scoop_home_xyz.copy()
-            new_xyz[0] += scoop_offset.linear.x
-            new_xyz[1] += scoop_offset.linear.y
-            new_xyz[2] += scoop_offset.linear.z
-
             curr_xyz = get_arm_output_xyz(scoop_arm, scoop_arm.last_feedback.position_command)
+            new_xyz = curr_xyz.copy()
+            new_xyz[0] += scoop_delta.linear.x
+            new_xyz[1] += scoop_delta.linear.y
+            new_xyz[2] += scoop_delta.linear.z
+
             curr_radius = math.sqrt(curr_xyz[0]*curr_xyz[0] + curr_xyz[1]*curr_xyz[1])
             new_radius = math.sqrt(new_xyz[0]*new_xyz[0] + new_xyz[1]*new_xyz[1])
 
             # avoid issues with elbow singularity
-            if new_radius > 0.55 and new_radius > curr_radius:
-                new_xyz = curr_xyz
-            else:
-                prev_scoop_offset = scoop_offset
-
-            pos_obj = PositionObjective('output', xyz=new_xyz, idx=6, weight=1.0)
             seed_joints = scoop_arm.last_feedback.position
-            # avoid elbow down 
             seed_joints[2] = abs(seed_joints[2])
+            if seed_joints[2] > 0.2 or new_radius < curr_radius:
+                pos_obj = PositionObjective('output', xyz=new_xyz, idx=6, weight=1.0)
 
-            scoop_arm.robot_model.solve_inverse_kinematics(
-                    seed_joints,
-                    pos_obj,
-                    output=target_joints)
+                scoop_arm.robot_model.solve_inverse_kinematics(
+                        seed_joints,
+                        pos_obj,
+                        output=target_joints)
+
+                scoop_arm.pending_command.led.clear()
+            else:
+                scoop_arm.pending_command.led = 'orange'
 
             # offset scoop angle based on gravity vector
             o = scoop_arm.last_feedback[3].orientation
@@ -147,7 +146,7 @@ if __name__ == '__main__':
             theta = math.acos(x_l @ [0, 0, -1])
             print(f'Theta offset: {np.rad2deg(theta)}')
 
-            target_joints[3] = scoop_offset.angular.z - theta + np.pi/12
+            target_joints[3] = scoop_delta.angular.z - theta + np.pi/12
             #print(target_joints)
             scoop_goal.clear()
             scoop_goal.add_waypoint(t=0.5, position=target_joints)

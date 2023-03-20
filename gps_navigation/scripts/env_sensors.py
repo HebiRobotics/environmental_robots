@@ -2,6 +2,7 @@
 
 import rospy
 from std_msgs.msg import Float64
+from std_srvs.srv import Trigger, TriggerRequest
 
 import numpy as np
 import hebi
@@ -30,6 +31,7 @@ if __name__ == '__main__':
     lookup = hebi.Lookup()
     rospy.sleep(2)
 
+
     family = 'Chevron-IO'
     names = ['Sensors']
     sensor_board = lookup.get_group_from_names(family, names)
@@ -47,14 +49,20 @@ if __name__ == '__main__':
     co2_ppm = Float64(0.0)
     moisture_vwc = Float64(0.0)
 
+    def take_vwc_cb(request: TriggerRequest):
+        moisture_publisher.publish(moisture_vwc)
+        return []
+
     def send_vwc(evt):
         moisture_publisher.publish(moisture_vwc)
 
     def send_co2(evt):
         co2_publisher.publish(co2_ppm)
 
-    rospy.Timer(rospy.Duration(0.1), send_vwc)
+    #rospy.Timer(rospy.Duration(0.1), send_vwc)
     rospy.Timer(rospy.Duration(0.1), send_co2)
+
+    rospy.Service('take_moisture_reading', Trigger, take_vwc_cb)
 
     while not rospy.is_shutdown():
         t = rospy.get_time()

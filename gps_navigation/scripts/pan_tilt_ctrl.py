@@ -93,8 +93,7 @@ class HebiCameraMast:
 
 class MastControlState(Enum):
     STARTUP = auto()
-    HOME_FRONT = auto()
-    HOME_REAR = auto()
+    HOMING = auto()
     TELEOP = auto()
     DISCONNECTED = auto()
     EXIT = auto()
@@ -102,15 +101,13 @@ class MastControlState(Enum):
 class MastInputs:
     v_pan: float
     v_tilt: float
-    home_front: bool
-    home_rear: bool
+    goto_pose: 'int|None'
     flood_light: float
 
-    def __init__(self, sliders: 'list[float]', home_front: bool, home_rear: bool, flood: float):
+    def __init__(self, sliders: 'list[float]', goto_pose: 'int|None', flood: float):
         self.pan = sliders[0]
         self.tilt = sliders[1]
-        self.home_front = home_front
-        self.home_rear = home_rear
+        self.goto_pose = goto_pose
         self.flood_light = flood
 
 
@@ -118,15 +115,15 @@ class MastControl:
     PAN_SCALING = 0.5
     TILT_SCALING = -0.5
 
-    def __init__(self, camera_mast: HebiCameraMast, camera: HebiCamera, front_pose=[0, 0], rear_pose=[0, 0]):
+    def __init__(self, camera_mast: HebiCameraMast, camera: HebiCamera, home_poses=[]):
         self.state = MastControlState.STARTUP
         self.mast = camera_mast
         self.camera = camera
 
         self.last_input_time = time()
 
-        self.home_front = front_pose
-        self.home_rear = rear_pose
+        self.home_poses = home_poses
+        self.current_pose = None
 
     @property
     def running(self):
@@ -152,17 +149,15 @@ class MastControl:
         self.camera.spot_light = inputs.flood_light
 
         if self.state is self.state.STARTUP:
-            self.transition_to(t_now, self.state.HOME_FRONT)
+            self.transition_to(t_now, self.state.HOMING, 0)
 
-        elif self.state is self.state.HOME_FRONT or self.state is self.state.HOME_REAR:
+        elif self.state is self.state.HOMING:
             if t_now > self.mast.trajectory.end_time:
                 self.transition_to(t_now, self.state.TELEOP)
 
         elif self.state is self.state.TELEOP:
-            if inputs.home_front:
-                self.transition_to(t_now, self.state.HOME_FRONT)
-            elif inputs.home_rear:
-                self.transition_to(t_now, self.state.HOME_REAR)
+            if inputs.goto_pose is not None:
+                self.transition_to(t_now, self.state.HOMING, inputs.goto_pose)
             else:
                 Δpan  = inputs.pan * self.PAN_SCALING
                 Δtilt = inputs.tilt * self.TILT_SCALING
@@ -170,7 +165,7 @@ class MastControl:
 
                 self.mast.set_velocity(t_now, Δt, [Δpan, Δtilt])
 
-    def transition_to(self, t_now: float, new_state: MastControlState):
+    def transition_to(self, t_now: float, new_state: MastControlState, *args):
         if new_state is self.state:
             return
 
@@ -178,17 +173,20 @@ class MastControl:
             print("Transitioning to Disconnected")
             self.mast.trajectory = None
             self.mast.cmd.velocity = None
+            self.current_pose = None
 
-        elif new_state is self.state.HOME_FRONT:
-            print("Transitioning to Homing (Front)")
-            self.mast.set_position(t_now, 3.0, self.home_front)
-
-        elif new_state is self.state.HOME_REAR:
-            print("Transitioning to Homing (Rear)")
-            self.mast.set_position(t_now, 3.0, self.home_rear)
+        elif new_state is self.state.HOMING:
+            idx = args[0]
+            if idx < 0 or idx >= len(self.home_poses):
+                print(f"There are only {len(self.home_poses)} poses stored, cannot go to pose {idx+1}")
+            else:
+                print(f"Transitioning to Homing (Pose {idx})")
+                self.current_pose = idx
+                self.mast.set_position(t_now, 3.0, self.home_poses[idx])
 
         elif new_state is self.state.TELEOP:
             print("Transitioning to Manual Control")
+            self.current_pose = None
 
         elif new_state is self.state.EXIT:
             print("Transitioning to Exit")
@@ -198,7 +196,7 @@ class MastControl:
 
 def setup_mobile_io(m: 'MobileIO'):
     m.set_button_label(1, 'view')
-    m.set_button_mode(1, 1)
+    m.set_button_mode(1, 0)
     m.set_button_label(2, 'light')
     m.set_button_mode(2, 1)
 
@@ -210,7 +208,7 @@ def setup_mobile_io(m: 'MobileIO'):
     m.set_axis_value(4, -1.0)
 
 
-def parse_mobile_feedback(m: 'MobileIO'):
+def parse_mobile_feedback(m: 'MobileIO', current_pose):
     if not m.update(0.0):
         return None
 
@@ -222,14 +220,17 @@ def parse_mobile_feedback(m: 'MobileIO'):
     pan  = 0.0 #-1.0 * m.get_axis_state(1)
     tilt = 0.0 #m.get_axis_state(2)
 
-    home_front = False
-    home_rear = False
+    goto_pose = None
     if m.get_button_diff(1) == 1:
-        home_rear = True
-    elif m.get_button_diff(1) == -1:
-        home_front = True
+        if current_pose is None:
+            goto_pose = 0
+        else:
+            goto_pose = current_pose + 1
 
-    return MastInputs([pan, tilt], home_front, home_rear, flood=flood_light)
+    if goto_pose:
+        goto_pose = goto_pose % 3
+
+    return MastInputs([pan, tilt], goto_pose, flood=flood_light)
 
 
 if __name__ == "__main__":
@@ -266,7 +267,7 @@ if __name__ == "__main__":
     m.update()
     setup_mobile_io(m)
     
-    mast_control = MastControl(mast, camera, front_pose=[-0.7, 2.2], rear_pose=[0.55, 4.15])
+    mast_control = MastControl(mast, camera, [[-0.7, 2.2], [0.55, 4.15], [0.0, 0.0]])
 
     #######################
     ## Main Control Loop ##
@@ -275,7 +276,7 @@ if __name__ == "__main__":
     cmd = hebi.GroupCommand(1)
     while mast_control.running:
         t = time()
-        inputs = parse_mobile_feedback(m)
+        inputs = parse_mobile_feedback(m, mast_control.current_pose)
         mast_control.update(t, inputs)
         # Update mobileIO stream angle
         if inputs:

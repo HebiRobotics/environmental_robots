@@ -44,7 +44,7 @@ if __name__ == '__main__':
     dig_vel = Float64(0.0)
     dig_z_offset = Float64(0.0)
 
-    scoop_pose_offset = Twist()
+    scoop_pose_delta = Twist()
 
     twist = Twist()
 
@@ -71,7 +71,7 @@ if __name__ == '__main__':
     cmd_pub = rospy.Publisher('~cmd_vel', Twist, queue_size=1)
     drill_pub = rospy.Publisher('/auger_velocity', Float64, queue_size=1)
     depth_pub = rospy.Publisher('/auger_z_offset', Float64, queue_size=1)
-    scoop_pub = rospy.Publisher('/scoop_pose_offset', Twist, queue_size=1)
+    scoop_pub = rospy.Publisher('/scoop_pose_delta', Twist, queue_size=1)
 
     deploy_scoop = rospy.ServiceProxy('/deploy_scoop', SetBool)
     #deploy_sensor = rospy.ServiceProxy('/deploy_sensor', SetBool)
@@ -132,8 +132,8 @@ if __name__ == '__main__':
 
 
     def publish_scoop(evt: TimerEvent):
-        global scoop_pose_offset
-        scoop_pub.publish(scoop_pose_offset)
+        global scoop_pose_delta
+        scoop_pub.publish(scoop_pose_delta)
 
 
     rospy.Timer(rospy.Duration.from_sec(0.2), publish_twist)
@@ -168,12 +168,12 @@ if __name__ == '__main__':
             deploy_scoop(True)
         elif mio.get_button_diff(DEPLOY_SCOOP_BTN) == -1:
             deploy_scoop(False)
-            scoop_pose_offset.linear.x = 0.0
-            scoop_pose_offset.linear.y = 0.0
-            scoop_pose_offset.linear.z = 0.0
+            scoop_pose_delta.linear.x = 0.0
+            scoop_pose_delta.linear.y = 0.0
+            scoop_pose_delta.linear.z = 0.0
             mio.set_button_mode(SCOOP_BTN, 0)
             mio.set_button_mode(SCOOP_BTN, 1)
-            scoop_pose_offset.angular.z = -np.pi / 2.0
+            scoop_pose_delta.angular.z = -np.pi / 2.0
 
         if mio.get_button_diff(SCOOP_BTN) == 1:
             mio.set_button_label(SCOOP_BTN, 'scoop')
@@ -181,20 +181,18 @@ if __name__ == '__main__':
             mio.set_button_label(SCOOP_BTN, 'dump')
 
         if mio.get_button_state(DEPLOY_SCOOP_BTN) == 1:
-            scoop_pose_offset.linear.z +=  0.001 * mio.get_axis_state(SCOOP_Z_AXIS)
-            x = scoop_pose_offset.linear.x
-            y = scoop_pose_offset.linear.y
+            dx = 0.02 * mio.get_axis_state(SCOOP_X_AXIS)
+            dy = -0.02 * mio.get_axis_state(SCOOP_Y_AXIS)
+            dz = 0.05 * mio.get_axis_state(SCOOP_Z_AXIS)
 
-            dx = 0.001 * mio.get_axis_state(SCOOP_X_AXIS)
-            dy = -0.001 * mio.get_axis_state(SCOOP_Y_AXIS)
-
-            scoop_pose_offset.linear.x = x + dx 
-            scoop_pose_offset.linear.y = y + dy
+            scoop_pose_delta.linear.x = dx 
+            scoop_pose_delta.linear.y = dy
+            scoop_pose_delta.linear.z = dz 
 
             if mio.get_button_state(SCOOP_BTN):
-                scoop_pose_offset.angular.z = np.pi/2.0 
+                scoop_pose_delta.angular.z = np.pi/2.0 
             else:
-                scoop_pose_offset.angular.z = -np.pi/2.0
+                scoop_pose_delta.angular.z = -np.pi/2.0
 
         dig_z_offset.data = 0.35 * (mio.get_axis_state(AUGER_DEPTH_SLIDER) - 1.0) / 2.0
         if mio.get_button_state(AUGER_BTN) == 1:
