@@ -163,6 +163,9 @@ class MastControl:
                 Δtilt = inputs.tilt * self.TILT_SCALING
                 Δt = 0.25 # sec
 
+                if Δpan != 0.0 or Δtilt != 0.0:
+                    self.current_pose = None
+
                 self.mast.set_velocity(t_now, Δt, [Δpan, Δtilt])
 
     def transition_to(self, t_now: float, new_state: MastControlState, *args):
@@ -186,7 +189,6 @@ class MastControl:
 
         elif new_state is self.state.TELEOP:
             print("Transitioning to Manual Control")
-            self.current_pose = None
 
         elif new_state is self.state.EXIT:
             print("Transitioning to Exit")
@@ -267,7 +269,8 @@ if __name__ == "__main__":
     m.update()
     setup_mobile_io(m)
     
-    mast_control = MastControl(mast, camera, [[-0.7, 2.2], [0.55, 4.15], [0.0, 0.0]])
+    pose_labels = ['front', 'rear', 'drive']
+    mast_control = MastControl(mast, camera, [[-0.7, 2.2], [0.55, 4.15], [0.0, 2.0]])
 
     #######################
     ## Main Control Loop ##
@@ -277,9 +280,17 @@ if __name__ == "__main__":
     while mast_control.running:
         t = time()
         inputs = parse_mobile_feedback(m, mast_control.current_pose)
+
+        # reset UI if we just reconnected in case tablet UI was restarted
+        if inputs and mast_control.state == MastControlState.DISCONNECTED:
+            setup_mobile_io(m)
+
         mast_control.update(t, inputs)
+
         # Update mobileIO stream angle
         if inputs:
+            if inputs.goto_pose is not None:
+                m.set_button_label(1, pose_labels[inputs.goto_pose])
             # pi rad offset needed for wide angle cameras
             cmd.io.c.set_float(1, mast_control.camera.roll + np.pi)
             m._group.send_command(cmd)

@@ -35,14 +35,16 @@ if __name__ == '__main__':
     # take over drill control
     def drill_srv(req: TriggerRequest):
         global trigger
+        print('Routine Triggered!')
         trigger = True
+        return []
 
-    rospy.Service('drill', Trigger, drill_srv)
+    rospy.Service('~drill', Trigger, drill_srv)
 
     def build_drill_trajectory():
         start_time = rospy.get_time()
         # 0 to -.35
-        depths = [plunge_depth, 0, -0.1, -0.1,  0, -0.35, -0.35,  0]
+        depths = [plunge_depth, 0, -0.19, -0.19,  0, -0.35, -0.35,  0]
         times =  [0,            2,    7,    9, 12,    17,    19, 22]
         times = [start_time + t for t in times]
         return hebi.trajectory.create_trajectory(times, depths)

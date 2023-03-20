@@ -7,12 +7,13 @@ import rospy
 from rospy.timer import TimerEvent
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Float64
-from std_srvs.srv import SetBool, SetBoolRequest
+from std_srvs.srv import SetBool, SetBoolRequest, Trigger
 
 
 SCOOP_BTN = 3
 #PXRF_BTN = 4
 DEPLOY_SCOOP_BTN = 4
+AUTO_DRILL_BTN = 5
 AUGER_BTN = 7
 
 SCOOP_Y_AXIS = 1
@@ -27,15 +28,27 @@ FWD_AXIS = 8
 
 
 def setup_mobile_io(m: 'MobileIO'):
-    m.set_button_label(1, 'view')
-    m.set_button_mode(1, 1)
-    m.set_button_label(2, 'light')
-    m.set_button_mode(2, 1)
+    m.set_button_label(SCOOP_BTN, 'dump')
+    m.set_button_label(AUGER_BTN, 'drill')
+    m.set_button_label(DEPLOY_SCOOP_BTN, 'dploy')
+    m.set_button_label(AUTO_DRILL_BTN, 'auto')
 
-    m.set_axis_label(4, '\U0001F4A1')
+    m.set_button_mode(SCOOP_BTN, 1)
+    m.set_button_mode(AUGER_BTN, 1)
+    m.set_button_mode(DEPLOY_SCOOP_BTN, 1)
 
-    # Since this value is rescaled -1:1 -> 0:1, set to "0" position to start
-    m.set_axis_value(4, -1.0)
+    m.set_axis_label(SCOOP_X_AXIS, 'scoop ctrl')
+    m.set_axis_label(SCOOP_Y_AXIS, '')
+    m.set_axis_label(SCOOP_Z_AXIS, 'Z')
+    m.set_snap(SCOOP_Z_AXIS, 0)
+
+    m.set_axis_label(TURN_AXIS, '')
+    m.set_axis_label(FWD_AXIS, 'drive')
+
+    m.set_axis_value(AUGER_DEPTH_SLIDER, 1.0)
+    m.set_axis_value(AUGER_SPEED_SLIDER, 0.0)
+    m.set_axis_label(AUGER_DEPTH_SLIDER, '\u21f3')
+    m.set_axis_label(AUGER_SPEED_SLIDER, '\U0001F300')
 
 
 if __name__ == '__main__':
@@ -69,11 +82,12 @@ if __name__ == '__main__':
     rospy.Subscriber('/cmd_vel/managed', Twist, nav_cmd_cb)
 
     cmd_pub = rospy.Publisher('~cmd_vel', Twist, queue_size=1)
-    drill_pub = rospy.Publisher('/auger_velocity', Float64, queue_size=1)
-    depth_pub = rospy.Publisher('/auger_z_offset', Float64, queue_size=1)
+    drill_pub = rospy.Publisher('/routine_manager/auger_velocity', Float64, queue_size=1)
+    depth_pub = rospy.Publisher('/routine_manager/auger_z_offset', Float64, queue_size=1)
     scoop_pub = rospy.Publisher('/scoop_pose_delta', Twist, queue_size=1)
 
     deploy_scoop = rospy.ServiceProxy('/deploy_scoop', SetBool)
+    auto_drill = rospy.ServiceProxy('/routine_manager/drill', Trigger)
     #deploy_sensor = rospy.ServiceProxy('/deploy_sensor', SetBool)
 
     lookup = hebi.Lookup()
@@ -87,29 +101,6 @@ if __name__ == '__main__':
 
     mio.resetUI()
     setup_mobile_io(mio)
-
-    #mio.set_button_label(PXRF_BTN, 'pxrf')
-    mio.set_button_label(SCOOP_BTN, 'dump')
-    mio.set_button_label(AUGER_BTN, 'drill')
-    mio.set_button_label(DEPLOY_SCOOP_BTN, 'dploy')
-
-    #mio.set_button_mode(PXRF_BTN, 1)
-    mio.set_button_mode(SCOOP_BTN, 1)
-    mio.set_button_mode(AUGER_BTN, 1)
-    mio.set_button_mode(DEPLOY_SCOOP_BTN, 1)
-
-    mio.set_axis_label(SCOOP_X_AXIS, 'scoop ctrl')
-    mio.set_axis_label(SCOOP_Y_AXIS, '')
-    mio.set_axis_label(SCOOP_Z_AXIS, 'Z')
-    mio.set_snap(SCOOP_Z_AXIS, 0)
-
-    mio.set_axis_label(TURN_AXIS, '')
-    mio.set_axis_label(FWD_AXIS, 'drive')
-
-    mio.set_axis_value(AUGER_DEPTH_SLIDER, 1.0)
-    mio.set_axis_value(AUGER_SPEED_SLIDER, 0.0)
-    mio.set_axis_label(AUGER_DEPTH_SLIDER, '\u21f3')
-    mio.set_axis_label(AUGER_SPEED_SLIDER, '\U0001F300')
 
     last_fbk_mio = rospy.get_time()
     last_time_active_teleop = last_fbk_mio
@@ -154,6 +145,9 @@ if __name__ == '__main__':
             continue
 
         last_fbk_mio = now
+        # if we've just reconnected
+        if disconnected:
+            setup_mobile_io(mio)
         disconnected = False
 
         dx = mio.get_axis_state(FWD_AXIS)
@@ -163,6 +157,9 @@ if __name__ == '__main__':
 
         if twist.linear.x != 0.0 and twist.angular.z != 0:
             last_time_active_teleop = last_fbk_mio
+
+        if mio.get_button_diff(AUTO_DRILL_BTN) == 1:
+            auto_drill()
 
         if mio.get_button_diff(DEPLOY_SCOOP_BTN) == 1:
             deploy_scoop(True)
