@@ -2,9 +2,10 @@
 
 import os
 import rospy
-from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry
+from geometry_msgs.msg import Twist, PoseStamped
 from std_srvs.srv import Trigger, TriggerRequest
-from std_msgs.msg import Float64
+from std_msgs.msg import Float64, ColorRGBA
 
 import numpy as np
 import hebi
@@ -12,8 +13,14 @@ import hebi
 if __name__ == '__main__':
     rospy.init_node('routine_manager')
 
-    drill_pub = rospy.Publisher('/auger_velocity', Float64, queue_size=1)
-    depth_pub = rospy.Publisher('/auger_z_offset', Float64, queue_size=1)
+    sample_pub = rospy.Publisher('/sample_location', PoseStamped, queue_size=5, latch=True)
+    sample_loc = PoseStamped()
+
+    color_pub = rospy.Publisher('/robot_color', ColorRGBA, queue_size=5)
+    robot_color = ColorRGBA()
+
+    drill_pub = rospy.Publisher('/auger_velocity', Float64, queue_size=5)
+    depth_pub = rospy.Publisher('/auger_z_offset', Float64, queue_size=5)
 
     in_control = False
 
@@ -30,6 +37,13 @@ if __name__ == '__main__':
 
     rospy.Subscriber('~auger_velocity', Float64, drill_cb)
     rospy.Subscriber('~auger_z_offset', Float64, dig_cb)
+
+    def odom_cb(msg: Odometry):
+        sample_loc.header = msg.header
+        sample_loc.pose = msg.pose
+
+
+    rospy.Subscriber('/nav/odom', Odometry, odom_cb)
 
     trigger = False
     # take over drill control
@@ -55,6 +69,11 @@ if __name__ == '__main__':
     traj = None
     while not rospy.is_shutdown():
         if trigger:
+            robot_color.r = 0.0
+            robot_color.g = 0.0
+            robot_color.b = 1.0
+            robot_color.a = 1.0
+            color_pub.publish(robot_color)
             trigger = False
             in_control = True
             speed.data = 5.0
@@ -65,8 +84,14 @@ if __name__ == '__main__':
             if t < traj.end_time:
                 depth.data = traj.get_state(t)[0]
             else:
+                robot_color.r = 0.0
+                robot_color.g = 0.0
+                robot_color.b = 0.0
+                robot_color.a = 0.0
+                color_pub.publish(robot_color)
                 in_control = False
                 speed.data = 0.0
+                sample_pub.publish(sample_loc)
 
             depth_pub.publish(depth)
             drill_pub.publish(speed)
