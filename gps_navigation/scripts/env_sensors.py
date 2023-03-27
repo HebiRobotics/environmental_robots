@@ -25,6 +25,15 @@ def volts_to_vwc(v):
     return np.nan
 
 
+def volts_to_ppm(v):
+    if v == 0:
+        return 2200.0
+    elif 0 < v and v < 5.25:
+        return 400*v
+
+    return np.nan
+
+
 if __name__ == '__main__':
     rospy.init_node('environmental_sensors')
 
@@ -67,7 +76,7 @@ if __name__ == '__main__':
     while not rospy.is_shutdown():
         t = rospy.get_time()
         sensor_board.get_next_feedback(reuse_fbk=sensor_board_fbk)
-        co2_ppm.data = sensor_board_fbk.io.a.get_float(1)
+        co2_ppm.data = volts_to_ppm(sensor_board_fbk.io.a.get_float(1))
         moisture_vwc.data = volts_to_vwc(sensor_board_fbk.io.a.get_float(2))
 
 
