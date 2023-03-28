@@ -11,7 +11,10 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   rospy
   message_generation
+  genmsg
+  std_msgs
   geometry_msgs
+  neospectra
 )
 
 ## System dependencies are found with CMake's conventions
@@ -21,17 +24,20 @@ find_package(catkin REQUIRED COMPONENTS
 ## Declare ROS messages, services and actions ##
 ################################################
 
-## Generate messages in the 'msg' folder
-# add_message_files(
-#   FILES
-#   Message1.msg
-#   Message2.msg
-# )
+# Generate messages in the 'msg' folder
+add_message_files(
+  FILES
+  Sample.msg
+)
 
 # Generate services in the 'srv' folder
 add_service_files(
   FILES
   GetSamples.srv
+  GetState.srv
+  SaveSample.srv
+  GetNIRSample.srv
+  SaveNIRSample.srv
 )
 
 ## Generate actions in the 'action' folder
@@ -44,7 +50,9 @@ add_service_files(
 # Generate added messages and services with any dependencies listed here
 generate_messages(
   DEPENDENCIES
+  std_msgs
   geometry_msgs
+  neospectra
 )
 
 catkin_package(
