@@ -5,16 +5,17 @@
 
     <!-- hebi nodes -->
     <node name="environmental_sensors" pkg="gps_navigation" type="env_sensors.py" />
+    <node name="neospectra" pkg="neospectra" type="driver.py" />
 
     <rosparam file="$(find hebi_cpp_api_examples)/config/wheelie_params.yaml" command="load" />
     <node name="base_node" pkg="hebi_cpp_api_examples" type="wheelie_node"/>
-    <node name="mobile_io_teleop" pkg="gps_navigation" type="hebi_teleop_scoop.py" >
+    <node name="mobile_io_teleop" pkg="gps_navigation" type="hebi_teleop_probe.py" >
         <remap from="~cmd_vel" to="/routine_manager/cmd_vel"/>
     </node>
 
     <node name="pan_tilt_ctrl" pkg="gps_navigation" type="pan_tilt_ctrl.py" />
     <node name="auger_ctrl" pkg="gps_navigation" type="auger_ctrl.py" />
-    <node name="scoop_ctrl" pkg="gps_navigation" type="scoop_ctrl.py" />
+    <node name="probe_ctrl" pkg="gps_navigation" type="probe_ctrl.py" />
     <node name="color_ctrl" pkg="gps_navigation" type="color_ctrl.py" />
 
     <node name="routine_manager" pkg="gps_navigation" type="routine_manager.py" />
@@ -28,12 +29,6 @@
         <arg name="port" value="9090"/>
     </include>
 
-    <!-- vanta pxrf
-    <node name="pxrf_driver" pkg="pxrf" type="main" />
-    <node name="pxrf_manager" pkg="pxrf" type="pxrf_manager.py" />
-    -->
-
-    <!-- Run navigation
-    <node name="gps_navigation" pkg="gps_navigation" type="gps_navigation.py" output="screen"/>
-    -->
+    <!-- Run navigation -->
+    <node name="gps_navigation" pkg="gps_navigation" type="gps_navigation.py"/>
 </launch>

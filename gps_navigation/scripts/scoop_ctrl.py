@@ -77,7 +77,7 @@ if __name__ == '__main__':
         print(f'Scoop deployed: {request.data}')
         return [True, 'Deployed']
 
-    rospy.Service('deploy_scoop', SetBool, scoop_cb)
+    rospy.Service('deploy_sample_arm', SetBool, scoop_cb)
 
     # -0.35 to 0 (low to high)
     scoop_delta = Twist()

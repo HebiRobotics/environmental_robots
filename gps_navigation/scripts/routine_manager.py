@@ -1,28 +1,45 @@
 #! /usr/bin/env python3
 
 import os
+from enum import Enum, auto
+import numpy as np
+import hebi
+
 import rospy
+from rospy.timer import TimerEvent
 from nav_msgs.msg import Odometry
 from microstrain_inertial_msgs.msg import FilterHeading
 from geometry_msgs.msg import Twist, PoseStamped
 from std_srvs.srv import Trigger, TriggerRequest, SetBool
-from std_msgs.msg import Float64, ColorRGBA
+from std_msgs.msg import Float64, ColorRGBA, Bool
+from gps_navigation.msg import Sample
+from gps_navigation.srv import GetSamples, GetSamplesRequest, SaveSample, SaveNIRSample, GetNIRSample, GetNIRSampleRequest
+from neospectra.msg import NirReading
 
-import numpy as np
-import hebi
 
-from enum import Enum, auto
+def build_sample(location, sample_type, value=np.nan):
+    sample = Sample()
+    sample.header.stamp = rospy.Time.now()
+    sample.location = location
+    sample.sample_type = sample_type
+    sample.scalar_value = value 
+    return sample
+
 
 class RoutineStates(Enum):
     INACTIVE = auto()
     DRILLING = auto()
+    STOP_DRILL = auto()
     TURNING = auto()
     DEPLOYING = auto()
-    SCOOPING = auto()
+    COLLECTING = auto()
     STOWING = auto()
 
-class RoutineInputs:
-    trigger = False
+class SampleTypes(Enum):
+    DIRT = auto()
+    VWC = auto()
+    NIR = auto()
+
 
 class RoutineManager:
     def __init__(self):
@@ -33,9 +50,18 @@ class RoutineManager:
         self.raw_heading = np.nan
         self.heading_offset = 0.0
         self.target_heading = np.nan
+        self.heading_integral = 0.0
         self.vel_cmd = Twist()
 
-        self.trigger = False
+        self.start_drill = False
+        self.cancel = False
+
+        self.start_nir = False
+        self.nir_spectrum = None
+
+        self.start_vwc = False
+        self.vwc_readings = []
+
         self.keyframes = None
     
     @property
@@ -46,31 +72,66 @@ class RoutineManager:
     def update(self):
         t = rospy.get_time()
         if self.state == RoutineStates.INACTIVE:
-            if self.trigger:
-                self.trigger = False
+            if self.start_drill:
+                self.start_drill = False
                 self.transition_to(RoutineStates.DRILLING)
+            
+            if self.start_vwc:
+                self.start_vwc = False
+                self.transition_to(RoutineStates.COLLECTING, SampleTypes.VWC)
+            
+            if self.start_nir:
+                self.start_nir = False
+                self.transition_to(RoutineStates.COLLECTING, SampleTypes.NIR)
 
         elif self.state == RoutineStates.DRILLING:
-            if t < self.keyframes['t'][-1]:
-                self.depth.data = np.interp(t, self.keyframes['t'], self.keyframes['depth'])
-                #depth_pub.publish(self.depth)
+            if self.cancel:
+                self.cancel = False
+                self.transition_to(RoutineStates.STOP_DRILL)
+            elif t < self.keyframes['t'][-1]:
+                #self.depth.data = np.interp(t, self.keyframes['t'], self.keyframes['depth'])
+                depth_pub.publish(self.depth)
             else:
                 self.transition_to(RoutineStates.TURNING)
 
+        elif self.state == RoutineStates.STOP_DRILL:
+            if t < self.keyframes['t'][-1]:
+                self.depth.data = np.interp(t, self.keyframes['t'], self.keyframes['depth'])
+                depth_pub.publish(self.depth)
+            else:
+                self.transition_to(RoutineStates.INACTIVE)
+
         elif self.state == RoutineStates.TURNING:
-            err = self.target_heading - self.curr_heading
-            # dumb hacks because 359 and 0 are right next to each other
-            if abs(err) > 4:
-                err = np.sign(err) * (2 * np.pi - err)
-            print(f'Turn P ctrl err: {err}')
-            self.vel_cmd.angular.z = err * -0.75
+            err = self.curr_heading - self.target_heading
+            self.heading_integral += err
+            print(f'Turn err: {err}')
+            self.vel_cmd.angular.z = 0.75 * err + 0.001 * self.heading_integral
             twist_pub.publish(self.vel_cmd)
             if abs(err) < 0.02:
                 self.transition_to(RoutineStates.DEPLOYING)
+
         elif self.state == RoutineStates.DEPLOYING:
-            print('Done!')
-            sample_pub.publish(self.current_loc)
             self.transition_to(RoutineStates.INACTIVE)
+
+        elif self.state == RoutineStates.COLLECTING:
+            if self.sample_type == SampleTypes.DIRT:
+                sample = build_sample(self.current_loc.pose.position, 'dirt')
+                save_sample(sample)
+                self.transition_to(RoutineStates.INACTIVE)
+
+            elif self.sample_type == SampleTypes.VWC:
+                if self.state_end_time < t:
+                    avg = np.mean(self.vwc_readings)
+                    sample = build_sample(self.current_loc.pose.position, 'vwc', avg)
+                    save_sample(sample)
+                    self.transition_to(RoutineStates.INACTIVE)
+
+            elif self.sample_type == SampleTypes.NIR:
+                if self.state_end_time < t and self.nir_spectrum is not None:
+                    sample = build_sample(self.current_loc.pose.position, 'nir')
+                    save_nir_sample(sample, self.nir_spectrum)
+                    self.transition_to(RoutineStates.INACTIVE)
+
 
     def transition_to(self, new_state, *args):
         if new_state == self.state:
@@ -87,9 +148,14 @@ class RoutineManager:
         elif new_state == RoutineStates.DRILLING:
             drill_pub.publish(Float64(5.0))
             self.keyframes = self.build_drill_trajectory()
+
+        elif new_state == RoutineStates.STOP_DRILL:
+            drill_pub.publish(Float64(-5.0))
+            self.keyframes = self.build_reverse_trajectory()
             
         elif new_state == RoutineStates.TURNING:
             drill_pub.publish(Float64(0.0))
+            self.heading_integral = 0.0
             # pick which way we turn to minimize heading windup
             turn_angle = -np.pi
             if self.curr_heading < 0:
@@ -97,8 +163,23 @@ class RoutineManager:
 
             self.target_heading = self.curr_heading + turn_angle
 
-        elif self.state == RoutineStates.DEPLOYING:
+        elif new_state == RoutineStates.DEPLOYING:
             deploy_scoop(True)
+
+        elif new_state == RoutineStates.COLLECTING:
+            print('transition to collecting')
+            self.sample_type = args[0]
+
+            self.state_end_time = rospy.get_time()
+            if self.sample_type == SampleTypes.DIRT:
+                pass
+            elif self.sample_type == SampleTypes.VWC:
+                self.state_end_time += 2
+                self.vwc_readings = []
+            elif self.sample_type == SampleTypes.NIR:
+                self.state_end_time += 12
+                self.nir_spectrum = None
+                start_nir_measurement()
 
         self.state = new_state
 
@@ -106,23 +187,22 @@ class RoutineManager:
         start_time = rospy.get_time()
         # 0 to -.35
         depths =           [self.augur_depth, 0.0, -0.22, -0.22, 0.0, -0.22, -0.35, -0.35, 0.0]
-        #times =  np.cumsum([start_time,   2.0,   5.0,   2.0, 2.0,   2.0,  10.0,   4.0, 5.0])
-        times =  np.cumsum([start_time,   0.2,   .50,   .20, .20,   .20,  .100,   .4, .50])
-        print(times)
+        times =  np.cumsum([start_time,       2.0,   5.0,   2.0, 2.0,   2.0,   6.0,   3.0, 5.0])
+        #times =  np.cumsum([start_time,   0.2,   .50,   .20, .20,   .20,  .100,   .4, .50])
+        return {'t': times, 'depth': depths}
 
+
+    def build_reverse_trajectory(self):
+        start_time = rospy.get_time()
+        depths = [self.augur_depth, 0.0]
+        times = [start_time,start_time+5.0]
         return {'t': times, 'depth': depths}
 
 if __name__ == '__main__':
     manager = RoutineManager()
     rospy.init_node('routine_manager')
 
-    sample_pub = rospy.Publisher('/sample_location', PoseStamped, queue_size=5, latch=True)
-
     color_pub = rospy.Publisher('/robot_color', ColorRGBA, queue_size=5)
-
-    drill_pub = rospy.Publisher('/auger_velocity', Float64, queue_size=5)
-    depth_pub = rospy.Publisher('/auger_z_offset', Float64, queue_size=5)
-    twist_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=5)
 
     def clear_robot_color():
         c = ColorRGBA()
@@ -132,7 +212,6 @@ if __name__ == '__main__':
         c.a = 0.0
         color_pub.publish(c)
 
-
     def color_robot_blue():
         c = ColorRGBA()
         c.r = 0.0
@@ -140,6 +219,13 @@ if __name__ == '__main__':
         c.b = 1.0
         c.a = 1.0
         color_pub.publish(c)
+
+    drill_pub = rospy.Publisher('/auger_velocity', Float64, queue_size=5)
+    depth_pub = rospy.Publisher('/auger_z_offset', Float64, queue_size=5)
+    twist_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=5)
+
+    save_sample = rospy.ServiceProxy('/sample_store/save_sample', SaveSample)
+    save_nir_sample = rospy.ServiceProxy('/sample_store/save_nir_sample', SaveNIRSample)
 
 
     def dig_cb(msg):
@@ -181,20 +267,59 @@ if __name__ == '__main__':
             else:
                 manager.heading_offset -= 2*np.pi
 
-
-
-
     rospy.Subscriber('/nav/heading', FilterHeading, heading_cb)
 
-    deploy_scoop = rospy.ServiceProxy('/deploy_scoop', SetBool)
 
+    def vwc_cb(msg):
+        manager.vwc_readings.append(msg.data)
+
+    rospy.Subscriber('/moisture_sensor', Float64, vwc_cb)
+
+
+    def nir_cb(msg):
+        manager.nir_spectrum = msg
+
+    rospy.Subscriber('/neospectra/measurement', NirReading, nir_cb)
+    start_nir_measurement = rospy.ServiceProxy('/neospectra/take_reading', Trigger)
+
+    deploy_scoop = rospy.ServiceProxy('/deploy_sample_arm', SetBool)
 
     # take over drill control
     def drill_srv(req: TriggerRequest):
-        manager.trigger = True
+        if manager.state == RoutineStates.INACTIVE:
+            manager.start_drill = True
+        return []
+
+
+    def cancel_srv(req: TriggerRequest):
+        if manager.state == RoutineStates.DRILLING:
+            manager.cancel = True
         return []
 
     rospy.Service('~drill', Trigger, drill_srv)
+    rospy.Service('~cancel', Trigger, cancel_srv)
+
+
+    def sample_nir_cb(req: TriggerRequest):
+        if manager.state == RoutineStates.INACTIVE:
+            manager.start_nir = True
+        return []
+    rospy.Service('~sample_nir', Trigger, sample_nir_cb)
+
+    def sample_vwc_cb(req: TriggerRequest):
+        if manager.state == RoutineStates.INACTIVE:
+            manager.start_vwc = True
+        return []
+    rospy.Service('~sample_vwc', Trigger, sample_vwc_cb)
+
+
+    status_pub = rospy.Publisher('~status', Bool, queue_size=5)
+
+    def publish_status(evt: TimerEvent):
+        is_active = manager.state != RoutineStates.INACTIVE
+        status_pub.publish(Bool(is_active))
+
+    rospy.Timer(rospy.Duration.from_sec(0.2), publish_status)
 
     while not rospy.is_shutdown():
         manager.update()

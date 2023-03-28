@@ -68,10 +68,10 @@ if __name__ == '__main__':
     def send_co2(evt):
         co2_publisher.publish(co2_ppm)
 
-    #rospy.Timer(rospy.Duration(0.1), send_vwc)
+    rospy.Timer(rospy.Duration(0.1), send_vwc)
     rospy.Timer(rospy.Duration(1.0), send_co2)
 
-    rospy.Service('take_moisture_reading', Trigger, take_vwc_cb)
+    #rospy.Service('take_moisture_reading', Trigger, take_vwc_cb)
 
     while not rospy.is_shutdown():
         t = rospy.get_time()
