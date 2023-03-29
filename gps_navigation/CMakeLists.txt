@@ -35,6 +35,7 @@ add_service_files(
   FILES
   GetSamples.srv
   GetState.srv
+  GetPoses.srv
   SaveSample.srv
   GetNIRSample.srv
   SaveNIRSample.srv
