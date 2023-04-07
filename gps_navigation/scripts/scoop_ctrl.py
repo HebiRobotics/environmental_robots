@@ -4,7 +4,7 @@ import os
 import rospy
 from rospy.timer import TimerEvent
 
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import Twist, Point
 from std_srvs.srv import SetBool, SetBoolRequest
 from std_msgs.msg import Float64
 
