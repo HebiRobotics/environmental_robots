@@ -1,14 +1,18 @@
 <?xml version="1.0"?>
 <launch>
     <!-- gps driver -->
-    <include file="$(find microstrain_inertial_driver)/launch/microstrain.launch" />
+    <include file="$(find microstrain_inertial_driver)/launch/microstrain.launch">
+	    <arg name="params_file" value="$(find gps_navigation)/config/microstrain_params.yaml" />
+    </include>
 
     <!-- hebi nodes -->
     <node name="environmental_sensors" pkg="gps_navigation" type="env_sensors.py" />
     <node name="neospectra" pkg="neospectra" type="driver.py" />
 
-    <rosparam file="$(find hebi_cpp_api_examples)/config/wheelie_params.yaml" command="load" />
-    <node name="base_node" pkg="hebi_cpp_api_examples" type="wheelie_node"/>
+    <!-- rosparam file="$(find hebi_cpp_api_examples)/config/wheelie_params.yaml" command="load" />
+    <node name="base_node" pkg="hebi_cpp_api_examples" type="wheelie_node"/ -->
+    <rosparam command="load" file="$(find hebi_cpp_api_examples)/config/tready_base_params.yaml"/>
+    <node name="base_node" pkg="hebi_cpp_api_examples" type="treaded_base_node"/>
     <node name="mobile_io_teleop" pkg="gps_navigation" type="hebi_teleop_probe.py" >
         <remap from="~cmd_vel" to="/routine_manager/cmd_vel"/>
     </node>
@@ -20,6 +24,8 @@
 
     <node name="routine_manager" pkg="gps_navigation" type="routine_manager.py" />
     <node name="sample_store" pkg="gps_navigation" type="sample_store.py" />
+    <node name="trail_store" pkg="gps_navigation" type="path_store.py" />
+    <node name="co2_store" pkg="gps_navigation" type="co2_store.py" />
 
     <!-- throttle /nav/odom and /nav/heading for gui stability -->
     <node name="odom_throttler" pkg="topic_tools" type="throttle" args="messages /nav/odom 5.0"/>
@@ -29,6 +35,11 @@
         <arg name="port" value="9090"/>
     </include>
 
-    <!-- Run navigation -->
+    <!-- Run navigation
     <node name="gps_navigation" pkg="gps_navigation" type="gps_navigation.py"/>
+    -->
+
+    <!-- logging -->
+    <node name="logging" pkg="rosbag" type="record" args="-a -o /home/hebi/bagfiles/probe_config"/>
+    <node name="hebi_logging" pkg="gps_navigation" type="hebi_record.py"/>
 </launch>

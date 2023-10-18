@@ -9,20 +9,24 @@ import hebi
 
 
 def volts_to_vwc(v):
-    if v < 0.0:
-        return np.nan
-    elif v < 1.1:
-        return 10*v - 1
-    elif v < 1.3:
-        return 25*v - 17.5
-    elif v < 1.82:
-        return 48.08*v - 47.5
-    elif v < 2.2:
-        return 26.32*v - 7.89
-    elif v < 3:
-        return 62.5*v - 87.5
+    mv = 1000 * v
+    mv2 = mv*mv
+    mv3 = mv*mv*mv
+    return 4.824 *10e-10 * mv3 - 2.278*10e-6 * mv2 + 3.898*10e-3 * mv - 2.154
+    #if v < 0.0:
+    #    return np.nan
+    #elif v < 1.1:
+    #    return 10*v - 1
+    #elif v < 1.3:
+    #    return 25*v - 17.5
+    #elif v < 1.82:
+    #    return 48.08*v - 47.5
+    #elif v < 2.2:
+    #    return 26.32*v - 7.89
+    #elif v < 3:
+    #    return 62.5*v - 87.5
 
-    return np.nan
+    #return np.nan
 
 
 def volts_to_ppm(v):

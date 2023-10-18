@@ -14,21 +14,19 @@ from hebi_cpp_api_examples.msg import FlipperVelocityCommand
 
 GOTO_BTN = 1
 LIGHT_BTN = 2
-PROBE_BTN = 3
-DEPLOY_PROBE_BTN = 4
-AUTO_DRILL_BTN = 5
+DEPLOY_PXRF_BTN = 3
+CTRL_CO2_BTN = 4
+BTN5 = 5
 SAMPLE_BTN = 6
-AUGER_BTN = 7
-CLEAN_BTN = 8
+BTN7 = 7
+BTN8 = 8
 
 PROBE_Y_AXIS = 1
 PROBE_X_AXIS = 2
 PROBE_Z_AXIS = 3
 
-REAR_FLIPPER_AXIS = 4
-
-AUGER_DEPTH_SLIDER = 5
-AUGER_SPEED_SLIDER = 6
+FRONT_FLIPPER_AXIS = 5
+REAR_FLIPPER_AXIS = 6
 
 TURN_AXIS = 7
 FWD_AXIS = 8
@@ -42,30 +40,24 @@ def setup_mobile_io(m: 'MobileIO'):
     m.set_button_label(GOTO_BTN, 'view')
     m.set_button_label(LIGHT_BTN, '\U0001F4A1')
     m.set_button_mode(LIGHT_BTN, 1)
-    m.set_button_label(PROBE_BTN, 'vwc')
 
-    m.set_button_label(AUGER_BTN, 'drill')
-    m.set_button_label(DEPLOY_PROBE_BTN, 'dploy')
-    m.set_button_label(AUTO_DRILL_BTN, 'auto')
+    m.set_button_label(DEPLOY_PXRF_BTN, 'pxrf')
+    m.set_button_mode(DEPLOY_PXRF_BTN, 1)
+    m.set_button_label(CTRL_CO2_BTN, 'co2')
+    m.set_button_mode(CTRL_CO2_BTN, 1)
     m.set_button_label(SAMPLE_BTN, 'sample')
-    m.set_button_label(CLEAN_BTN, 'clean')
 
-    m.set_button_mode(PROBE_BTN, 1)
-    m.set_button_mode(AUGER_BTN, 1)
-    m.set_button_mode(DEPLOY_PROBE_BTN, 0)
 
     m.set_axis_label(PROBE_X_AXIS, 'pan/tilt')
-
-    m.set_axis_label(PROBE_Z_AXIS, 'F')
+    m.set_axis_label(PROBE_Z_AXIS, 'Z', blocking=False)
     m.set_snap(PROBE_Z_AXIS, 0)
+
+    m.set_axis_label(FRONT_FLIPPER_AXIS, 'F')
+    m.set_snap(FRONT_FLIPPER_AXIS, 0)
     m.set_axis_label(REAR_FLIPPER_AXIS, 'R')
     m.set_snap(REAR_FLIPPER_AXIS, 0)
 
     m.set_axis_label(FWD_AXIS, 'drive')
-
-    m.set_axis_value(AUGER_DEPTH_SLIDER, 1.0)
-    m.set_axis_label(AUGER_DEPTH_SLIDER, '\u21f3')
-    m.set_axis_label(AUGER_SPEED_SLIDER, '\U0001F300')
 
 
 if __name__ == '__main__':
@@ -87,12 +79,10 @@ if __name__ == '__main__':
     last_fbk_mio = rospy.get_time()
     last_time_active_teleop = last_fbk_mio
 
-    dig_vel = Float64(0.0)
-    dig_z_offset = Float64(0.0)
-
     light_level = Float64(0.0)
 
-    probe_pose_delta = Point()
+    co2_pose_delta = Point()
+    pxrf_pose_delta = Point()
     pan_tilt_vel = Twist()
 
     twist = Twist()
@@ -104,12 +94,11 @@ if __name__ == '__main__':
         gps_nav_twist = msg
     rospy.Subscriber('/cmd_vel/managed', Twist, nav_cmd_cb)
 
-    cmd_pub = rospy.Publisher('~cmd_vel', Twist, queue_size=1)
+    cmd_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
     flipper_pub = rospy.Publisher('/flipper_vel', FlipperVelocityCommand, queue_size=5)
 
-    drill_pub = rospy.Publisher('/routine_manager/auger_velocity', Float64, queue_size=1)
-    depth_pub = rospy.Publisher('/routine_manager/auger_z_offset', Float64, queue_size=1)
-    probe_pub = rospy.Publisher('/probe_pose_delta', Point, queue_size=1)
+    pxrf_delta_pub = rospy.Publisher('/pxrf_probe_pose_delta', Point, queue_size=1)
+    co2_delta_pub = rospy.Publisher('/co2_probe_pose_delta', Point, queue_size=1)
     set_tool_angle = rospy.ServiceProxy('/probe_ctrl/set_tool_angle', SetFloat)
 
     light_pub = rospy.Publisher('/pan_tilt_ctrl/light', Float64, queue_size=1)
@@ -130,13 +119,9 @@ if __name__ == '__main__':
     rospy.Subscriber('pan_tilt_ctrl/pose', String, pose_cb)
 
     deploy_probe = rospy.ServiceProxy('/deploy_sample_arm', SetBool)
-    auto_drill = rospy.ServiceProxy('/routine_manager/drill', Trigger)
-    cancel_drill = rospy.ServiceProxy('/routine_manager/cancel', Trigger)
     #deploy_sensor = rospy.ServiceProxy('/deploy_sensor', SetBool)
 
-    sample_vwc = rospy.ServiceProxy('/routine_manager/sample_vwc', Trigger)
-    sample_nir = rospy.ServiceProxy('/routine_manager/sample_nir', Trigger)
-    clean_drill = rospy.ServiceProxy('/auger_ctrl/clean', Trigger)
+    sample_pxrf = lambda: print('Hookup PXRF') #rospy.ServiceProxy('/routine_manager/sample_nir', Trigger)
 
     def publish_twist(evt: TimerEvent):
         global last_time_active_teleop
@@ -146,15 +131,13 @@ if __name__ == '__main__':
             cmd_pub.publish(twist)
 
 
-    def publish_drill(evt: TimerEvent):
-        global dig_vel, dig_z_offset
-        depth_pub.publish(dig_z_offset)
-        drill_pub.publish(dig_vel)
+    def publish_co2_delta(evt: TimerEvent):
+        global co2_pose_delta
+        co2_delta_pub.publish(co2_pose_delta)
 
-
-    def publish_probe(evt: TimerEvent):
-        global probe_pose_delta
-        probe_pub.publish(probe_pose_delta)
+    def publish_pxrf_delta(evt: TimerEvent):
+        global pxrf_pose_delta
+        pxrf_delta_pub.publish(pxrf_pose_delta)
 
 
     def publish_light(evt: TimerEvent):
@@ -163,8 +146,8 @@ if __name__ == '__main__':
 
 
     rospy.Timer(rospy.Duration.from_sec(0.2), publish_twist)
-    rospy.Timer(rospy.Duration.from_sec(0.2), publish_drill)
-    rospy.Timer(rospy.Duration.from_sec(0.2), publish_probe)
+    rospy.Timer(rospy.Duration.from_sec(0.2), publish_pxrf_delta)
+    rospy.Timer(rospy.Duration.from_sec(0.2), publish_co2_delta)
     rospy.Timer(rospy.Duration.from_sec(0.2), publish_light)
 
 
@@ -189,28 +172,26 @@ if __name__ == '__main__':
 
     rospy.Subscriber('/probe_ctrl/is_deployed', Bool, is_deployed_cb)
 
-    def on_probe_deploy(probe_deployed):
+    def on_probe_deploy(deploy):
+        global probe_deployed
         try:
-            deploy_probe(probe_deployed)
+            deploy_probe(deploy)
         except rospy.service.ServiceException:
             pass
-        if probe_deployed:
-            mio.set_button_label(DEPLOY_PROBE_BTN, 'stow', blocking=False)
-            mio.set_axis_label(PROBE_X_AXIS, 'probe ctrl', blocking=False)
-            mio.set_axis_label(PROBE_Z_AXIS, 'Z', blocking=False)
-            mio.set_axis_label(REAR_FLIPPER_AXIS, '', blocking=False)
+        probe_deployed = deploy
+        if deploy:
+            mio.set_button_label(DEPLOY_PXRF_BTN, 'stow', blocking=False)
+            # clear co2 selected 
+            mio.set_button_mode(CTRL_CO2_BTN, 0)
+            mio.set_button_mode(CTRL_CO2_BTN, 1)
         else:
-            mio.set_button_label(DEPLOY_PROBE_BTN, 'dploy', blocking=False)
-            mio.set_axis_label(PROBE_X_AXIS, 'pan/tilt', blocking=False)
-            mio.set_axis_label(PROBE_Z_AXIS, 'F', blocking=False)
-            mio.set_axis_label(REAR_FLIPPER_AXIS, 'R', blocking=False)
+            mio.set_button_label(DEPLOY_PXRF_BTN, 'pxrf', blocking=False)
+            mio.set_button_mode(DEPLOY_PXRF_BTN, 0)
+            mio.set_button_mode(DEPLOY_PXRF_BTN, 1)
 
-
-            probe_pose_delta.x = 0.0
-            probe_pose_delta.y = 0.0
-            probe_pose_delta.z = 0.0
-            mio.set_button_mode(PROBE_BTN, 0)
-            mio.set_button_mode(PROBE_BTN, 1)
+            pxrf_pose_delta.x = 0.0
+            pxrf_pose_delta.y = 0.0
+            pxrf_pose_delta.z = 0.0
             try:
                 set_tool_angle(np.pi)
             except rospy.service.ServiceException:
@@ -225,7 +206,6 @@ if __name__ == '__main__':
                 rospy.logwarn('mobileIO connection lost, stopping robot')
                 twist.linear.x = 0.0
                 twist.angular.z = 0.0
-                dig_vel.data = 0.0
             continue
 
         last_fbk_mio = now
@@ -254,62 +234,66 @@ if __name__ == '__main__':
         if twist.linear.x != 0.0 and twist.angular.z != 0:
             last_time_active_teleop = last_fbk_mio
 
-        if mio.get_button_diff(AUTO_DRILL_BTN) == 1:
-            try:
-                if not is_autonomous:
-                    auto_drill()
-                else:
-                    cancel_drill()
-            except rospy.service.ServiceException:
-                pass
+        pxrf_pressed = mio.get_button_state(DEPLOY_PXRF_BTN)
+        co2_pressed = mio.get_button_state(CTRL_CO2_BTN)
 
-        if mio.get_button_diff(DEPLOY_PROBE_BTN) == 1:
-            probe_deployed = not probe_deployed
-            on_probe_deploy(probe_deployed)
+        changed = mio.get_button_diff(DEPLOY_PXRF_BTN) or mio.get_button_diff(CTRL_CO2_BTN)
+        unselected = (not pxrf_pressed) and (not co2_pressed)
 
-        if mio.get_button_diff(PROBE_BTN) == 1:
-            mio.set_button_label(PROBE_BTN, 'nir', blocking=False)
-        elif mio.get_button_diff(PROBE_BTN) == -1:
-            mio.set_button_label(PROBE_BTN, 'vwc', blocking=False)
+        if mio.get_button_diff(DEPLOY_PXRF_BTN) != 0:
+            on_probe_deploy(pxrf_pressed)
+            if unselected:
+                mio.set_axis_label(PROBE_X_AXIS, 'pan/tilt', blocking=False)
+                mio.set_axis_label(PROBE_Z_AXIS, '', blocking=False)
+            else:
+                mio.set_axis_label(PROBE_X_AXIS, 'probe ctrl', blocking=False)
+                mio.set_axis_label(PROBE_Z_AXIS, 'Z', blocking=False)
+        elif mio.get_button_diff(CTRL_CO2_BTN) != 0:
+            if co2_pressed:
+                on_probe_deploy(False)
+                mio.set_axis_label(PROBE_X_AXIS, 'probe ctrl', blocking=False)
+                mio.set_axis_label(PROBE_Z_AXIS, 'Z', blocking=False)
+                mio.set_button_mode(DEPLOY_PXRF_BTN, 0)
+                mio.set_button_mode(DEPLOY_PXRF_BTN, 1)
 
-        if mio.get_button_state(CLEAN_BTN):
-            try:
-                clean_drill()
-            except rospy.service.ServiceException:
-                pass
+            elif unselected:
+                mio.set_axis_label(PROBE_X_AXIS, 'pan/tilt', blocking=False)
+                mio.set_axis_label(PROBE_Z_AXIS, '', blocking=False)
 
-        if probe_deployed:
+
+        if pxrf_pressed:
             dx = 0.02 * mio.get_axis_state(PROBE_X_AXIS)
             dy = -0.02 * mio.get_axis_state(PROBE_Y_AXIS)
             dz = 0.05 * mio.get_axis_state(PROBE_Z_AXIS)
 
-            probe_pose_delta.x = dx 
-            probe_pose_delta.y = dy
-            probe_pose_delta.z = dz 
+            pxrf_pose_delta.x = dx 
+            pxrf_pose_delta.y = dy
+            pxrf_pose_delta.z = dz 
 
-            using_probe = mio.get_button_state(PROBE_BTN)
             try:
-                if using_probe:
-                    set_tool_angle(np.pi/2)
-                else:
-                    set_tool_angle(np.pi)
+                set_tool_angle(np.pi/2)
             except rospy.service.ServiceException:
                 pass
 
             if mio.get_button_state(SAMPLE_BTN):
                 try:
-                    if using_probe:
-                        sample_nir()
-                    else:
-                        sample_vwc()
+                    sample_pxrf()
                 except rospy.service.ServiceException:
                     pass
+        elif co2_pressed:
+            dy = 0.02 * mio.get_axis_state(PROBE_X_AXIS)
+            dx = 0.02 * mio.get_axis_state(PROBE_Y_AXIS)
+            dz = 0.05 * mio.get_axis_state(PROBE_Z_AXIS)
+
+            co2_pose_delta.x = dx 
+            co2_pose_delta.y = dy
+            co2_pose_delta.z = dz 
         else:
             pan_tilt_vel.angular.x = mio.get_axis_state(PROBE_X_AXIS)
             pan_tilt_vel.angular.z = -1 * mio.get_axis_state(PROBE_Y_AXIS)
             pan_tilt_pub.publish(pan_tilt_vel)
 
-            front_flipper_vel = 0.8 * mio.get_axis_state(PROBE_Z_AXIS)
+            front_flipper_vel = 0.8 * mio.get_axis_state(FRONT_FLIPPER_AXIS)
             rear_flipper_vel = 0.8 * mio.get_axis_state(REAR_FLIPPER_AXIS)
             flipper_vels.front_left  = front_flipper_vel
             flipper_vels.front_right = -front_flipper_vel
@@ -318,11 +302,3 @@ if __name__ == '__main__':
             flipper_pub.publish(flipper_vels)
             rospy.Publisher('/flipper_vel', FlipperVelocityCommand, queue_size=5)
 
-        dig_z_offset.data = 0.55 * (mio.get_axis_state(AUGER_DEPTH_SLIDER) - 1.0) / 2.0 + 0.2
-        if mio.get_button_state(AUGER_BTN) == 1:
-            slider_val = mio.get_axis_state(AUGER_SPEED_SLIDER)
-            if abs(slider_val) < 0.1:
-                slider_val = 0.0
-            dig_vel.data = 6.0 * slider_val
-        elif mio.get_button_diff(AUGER_BTN) == -1:
-            dig_vel.data = 0.0

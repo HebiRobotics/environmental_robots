@@ -28,15 +28,15 @@ def get_arm_output_xyz(arm, angles):
 
 
 if __name__ == '__main__':
-    rospy.init_node('probe_ctrl')
+    rospy.init_node('co2_arm_ctrl')
 
     lookup = hebi.Lookup()
     rospy.sleep(2)
 
-    family = 'ScoopArm'
-    names = ['J1_base', 'J2_shoulder', 'J3_elbow', 'J4_scoop']
+    family = 'AugerArm'
+    names = ['J1_base', 'J2_shoulder', 'J3_elbow', 'J4_wrist']
     this_dir = os.path.dirname(__file__)
-    hrdf_file = os.path.join(this_dir, "Chevron-Probe-Arm.hrdf")
+    hrdf_file = os.path.join(this_dir, "Chevron-CO2-Arm.hrdf")
     gains_file = os.path.join(this_dir, "ChevronScoopArm-FullGains_STRATEGY4.xml")
 
     # Create Arm object
@@ -48,50 +48,49 @@ if __name__ == '__main__':
     probe_arm.load_gains(gains_file)
     probe_arm.update()
 
-    probe_stow = np.array([0, 2.8, 2.7, 0.0], dtype=np.float64)
-    probe_mid_stow = np.array([0, 2.2, 2.10, 0.0], dtype=np.float64)
-    probe_home = np.array([0, 0.7, 1.4, 2.25], dtype=np.float64)
+    #probe_mid_home = np.array([0, -1.2, -2.0, 0.8], dtype=np.float64)
+    probe_home = np.array([1.57, -1.2, -2.0, -0.8], dtype=np.float64)
 
     # we have to get the xyz position of the frame used for IK (not end effector)
     probe_home_xyz = get_arm_output_xyz(probe_arm, probe_home)
 
     probe_goal = hebi.arm.Goal(probe_arm.size)
-    probe_stow_goal = hebi.arm.Goal(probe_arm.size)
-    probe_stow_goal.add_waypoint(t=4, position=probe_mid_stow)
-    probe_stow_goal.add_waypoint(t=4, position=probe_stow)
-    probe_deploy_goal = hebi.arm.Goal(probe_arm.size)
-    probe_deploy_goal.add_waypoint(t=4, position=probe_mid_stow)
-    probe_deploy_goal.add_waypoint(t=4, position=probe_home)
+    #probe_stow_goal = hebi.arm.Goal(probe_arm.size)
+    #probe_stow_goal.add_waypoint(t=4, position=probe_mid_stow)
+    #probe_stow_goal.add_waypoint(t=4, position=probe_stow)
+    probe_home_goal = hebi.arm.Goal(probe_arm.size)
+    #probe_home_goal.add_waypoint(t=4, position=probe_mid_stow)
+    probe_home_goal.add_waypoint(t=6, position=probe_home)
 
     probe_arm.update()
-    probe_arm.set_goal(probe_stow_goal)
+    probe_arm.set_goal(probe_home_goal)
 
-    stow_complete = False
-    def srv_done_cb(evt: TimerEvent):
-        print('Deploy/Stow complete!')
-        global stow_complete
-        stow_complete = True
+    #stow_complete = False
+    #def srv_done_cb(evt: TimerEvent):
+    #    print('Deploy/Stow complete!')
+    #    global stow_complete
+    #    stow_complete = True
 
-    rospy.Timer(rospy.Duration.from_sec(9), srv_done_cb, oneshot=True)
+    #rospy.Timer(rospy.Duration.from_sec(9), srv_done_cb, oneshot=True)
 
-    probe_srv_called = False
-    probe_deploy = False
-    def probe_cb(request: SetBoolRequest):
-        global probe_srv_called, probe_deploy
-        if probe_deploy == request.data:
-            return [True, 'Already In Position']
-        probe_srv_called = True
-        probe_deploy = request.data
-        print(f'Probe deployed: {request.data}')
-        return [True, 'Deployed']
+    #probe_srv_called = False
+    #probe_deploy = False
+    #def probe_cb(request: SetBoolRequest):
+    #    global probe_srv_called, probe_deploy
+    #    if probe_deploy == request.data:
+    #        return [True, 'Already In Position']
+    #    probe_srv_called = True
+    #    probe_deploy = request.data
+    #    print(f'Probe deployed: {request.data}')
+    #    return [True, 'Deployed']
 
-    rospy.Service('deploy_sample_arm', SetBool, probe_cb)
+    #rospy.Service('deploy_sample_arm', SetBool, probe_cb)
 
-    is_deployed_pub = rospy.Publisher('~is_deployed', Bool, queue_size=3)
-    def status_cb(evt):
-        global probe_deploy
-        is_deployed_pub.publish(Bool(probe_deploy))
-    rospy.Timer(rospy.Duration.from_sec(1), status_cb)
+    #is_deployed_pub = rospy.Publisher('~is_deployed', Bool, queue_size=3)
+    #def status_cb(evt):
+    #    global probe_deploy
+    #    is_deployed_pub.publish(Bool(probe_deploy))
+    #rospy.Timer(rospy.Duration.from_sec(1), status_cb)
 
     # -0.35 to 0 (low to high)
     probe_delta = Point()
@@ -100,7 +99,7 @@ if __name__ == '__main__':
         global probe_delta
         probe_delta = msg
 
-    rospy.Subscriber('probe_pose_delta', Point, probe_delta_cb)
+    rospy.Subscriber('co2_probe_pose_delta', Point, probe_delta_cb)
 
     prev_tool_theta = 0.0
     tool_theta = 0.0
@@ -127,20 +126,7 @@ if __name__ == '__main__':
         diff_z = probe_delta.z != 0.0
         diff_theta = tool_theta != prev_tool_theta 
 
-        if not stow_complete:
-            pass
-        elif probe_srv_called:
-            stow_complete=False
-            if probe_deploy:
-                rospy.Timer(rospy.Duration.from_sec(8), srv_done_cb, oneshot=True)
-                probe_arm.set_goal(probe_deploy_goal)
-            else:
-                rospy.Timer(rospy.Duration.from_sec(8), srv_done_cb, oneshot=True)
-                probe_arm.set_goal(probe_stow_goal)
-
-            probe_srv_called = False
-
-        elif probe_deploy and (diff_x or diff_y or diff_z or diff_theta):
+        if diff_x or diff_y or diff_z or diff_theta:
             angles = probe_arm.last_feedback.position_command
             frames = probe_arm.robot_model.get_forward_kinematics('output', angles)
             curr_xyz = frames[6][:3, 3]
@@ -152,22 +138,24 @@ if __name__ == '__main__':
             curr_radius = math.sqrt(curr_xyz[0]*curr_xyz[0] + curr_xyz[1]*curr_xyz[1])
             new_radius = math.sqrt(new_xyz[0]*new_xyz[0] + new_xyz[1]*new_xyz[1])
 
-            # avoid issues with elbow singularity
             seed_joints = probe_arm.last_feedback.position
-            seed_joints[2] = abs(seed_joints[2])
+            # avoid issues with elbow singularity
 
-            at_limits = new_radius < 0.41 
+            at_limits = new_radius < 0.2
 
-            if (seed_joints[2] > 0.2 or new_radius < curr_radius):
+            if seed_joints[2] < 0.0 or new_radius < curr_radius:
                 pos_obj = PositionObjective('output', xyz=new_xyz, idx=6, weight=1.0)
+
+                # if it's not negative make it so
+                seed_joints[2] = -1.0 * abs(seed_joints[2])
 
                 probe_arm.robot_model.solve_inverse_kinematics(
                         seed_joints,
                         pos_obj,
                         output=test_joints)
 
-                if abs(test_joints[0]) > 0.35:
-                    at_limits = True
+                #if abs(test_joints[0]) > 0.35:
+                #    at_limits = True
             else:
                 at_limits = True
 
@@ -177,20 +165,12 @@ if __name__ == '__main__':
                 target_joints = test_joints.copy()
                 probe_arm.pending_command.led.color = 'transparent'
 
-
-            # offset scoop angle based on gravity vector
-            #o = probe_arm.last_feedback[3].orientation
-            # reorder wxyz to xyzw
-            #o = [*o[1:], o[0]]
-            # get x axis vector in global frame
-            #x_l = R.from_quat(o).as_matrix()[:, 0]
             x_l = frames[5][:3, 0]
             # get angle from level
             theta = math.acos(x_l @ [0, 0, -1])
-            new_theta = math.acos(x_l @ [0, 0, -1])
-            #print(f'Theta offset: {np.rad2deg(theta)} vs {np.rad2deg(new_theta)}')
+            print(f'Theta offset: {np.rad2deg(theta)}')
 
-            target_joints[3] =  tool_theta - theta
+            target_joints[3] =  theta - np.pi/2 + tool_theta
             #print(target_joints)
             probe_goal.clear()
             probe_goal.add_waypoint(t=0.5, position=target_joints)

@@ -152,8 +152,8 @@ if __name__ == '__main__':
 
         dx = mio.get_axis_state(FWD_AXIS)
         drz = mio.get_axis_state(TURN_AXIS)
-        twist.linear.x = 0.25 * np.sign(dx) * dx ** 2
-        twist.angular.z = -0.75 * np.sign(drz) * drz ** 2
+        twist.linear.x = 0.14 * np.sign(dx) * dx ** 2
+        twist.angular.z = 0.7 * np.sign(drz) * drz ** 2
 
         if twist.linear.x != 0.0 and twist.angular.z != 0:
             last_time_active_teleop = last_fbk_mio

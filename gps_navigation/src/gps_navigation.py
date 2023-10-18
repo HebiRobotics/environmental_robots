@@ -16,18 +16,18 @@ def wrapTopi(angle):
     return (angle + np.pi) % (2 * np.pi) - np.pi
 
 #Main function to control the robot using a PID controller
-class gps_navigation():
+class GpsNavigation():
     
     def __init__(self):
         #init parameters needed for waypoint nav
         rospy.init_node('gps_navigation', anonymous=True)
         self.X = 0
         self.Y = 0
-        self.xdot = 0
-        self.ydot = 0
-        self.vdot = 0
+        self.dx = 0
+        self.dy = 0
+        self.speed = 0
         self.psi = 0
-        self.psidot = 0
+        self.dpsi = 0
         self.t_prev = 0 
         self.t_curr = 0
         self.dt = 0
@@ -38,7 +38,7 @@ class gps_navigation():
 
         self.goalPos = None # in lon lat degree
         self.odom_sub = rospy.Subscriber('/nav/odom', Odometry, self.navigate) # do navigation when odom is published
-        self.goal_sub = rospy.Subscriber('/gps_navigation/goal', PoseStamped, self.setGoal) # for setting goal
+        self.goal_sub = rospy.Subscriber('/gps_navigation/goal', PoseStamped, self.goal_cb) # for setting goal
         self.cmd_pub = rospy.Publisher('/cmd_vel/managed', Twist, queue_size=5) # for publishing drive commands
         #need a subscriber to find the yaw
         self.goal_pub = rospy.Publisher('/gps_navigation/current_goal',PoseStamped,queue_size=5) # for publishing status of navigation (running/done)
@@ -59,17 +59,21 @@ class gps_navigation():
                 msg.pose.position.x = self.goalPos[0]
                 msg.pose.position.y = self.goalPos[1]
                 msg.pose.position.z = 1
+
             self.goal_pub.publish(msg)
             self.lastmsg = msg
             rate.sleep()
+    
+
     #set the heading of the robot
     def set_heading(self, data):
         if(data.heading_rad == 0 and data.heading_deg == 0):
             return
         self.psi = data.heading_rad
 
+
     #set the goal of x and y
-    def setGoal(self,data):
+    def goal_cb(self,data):
         if np.isnan(data.pose.position.x) or np.isnan(data.pose.position.y):
             self.lastmsg.pose.position.x = float('nan')
             self.lastmsg.pose.position.y = float('nan')
@@ -77,23 +81,25 @@ class gps_navigation():
             self.goalPos = None
         else:
             self.goalPos = np.array([data.pose.position.y,data.pose.position.x])
+    
+
     #main function to compute the outputs and drive the robot
     def navigate(self,data):
 
         if (data.pose.pose.position.x != 0 or data.pose.pose.position.y != 0):   
             self.X = data.pose.pose.position.x
             self.Y = data.pose.pose.position.y
-            self.xdot = data.twist.twist.linear.x
-            self.ydot = data.twist.twist.linear.y
-            self.vdot = sqrt(abs(self.xdot)**2 + abs(self.ydot)**2)
-            self.psidot = data.twist.twist.angular.z
+            self.dx = data.twist.twist.linear.x
+            self.dy = data.twist.twist.linear.y
+            self.speed = sqrt(abs(self.dx)**2 + abs(self.dy)**2)
+            self.dpsi = data.twist.twist.angular.z
         if self.goalPos is None: # don't need to do anything if no goal set
             cmd_msg_reset = Twist()
             self.cmd_pub.publish(cmd_msg_reset)
             return
 
         # calculate robot position and heading
-        robotPos = np.array([data.pose.pose.position.x, data.pose.pose.position.y])
+        robotPos = np.array([self.X, self.Y])
         #quat = data.pose.pose.orientation
         #r = R.from_quat([quat.x,quat.y,quat.z,quat.w])
         #xVec = r.as_dcm()[:,0]
@@ -112,7 +118,7 @@ class gps_navigation():
             print('----Finished Navigation----')
         #goalAngle = np.mod(atan2(relGoal[1],relGoal[0]),2*np.pi)
         #print('relative goal angle: %.2f degrees' %(goalAngle*180/np.pi))
-        print(f'robot heading angle: {self.psi*180/np.pi:.2f} degrees')
+        print(f'robot heading angle: {np.rad2deg(self.psi):.2f}°')
         current_time = rospy.get_rostime()
         self.dt = (current_time - self.prev).to_sec()
         angle, speed = self.controller.update(self.goalPos,
@@ -120,10 +126,10 @@ class gps_navigation():
                                               self.dt,
                                               self.X,
                                               self.Y,
-                                              self.xdot,
-                                              self.ydot,
-                                              self.psidot,
-                                              self.vdot)
+                                              self.dx,
+                                              self.dy,
+                                              self.dpsi,
+                                              self.speed)
         cmd_msg = Twist()
         cmd_msg.linear.x = speed
         cmd_msg.angular.z = angle 
@@ -154,7 +160,7 @@ class PIDController():
         self.error_dist_prev = 0
 
     #update the motor output and angle
-    def update(self, goal, psi, dt, X, Y, xdot, ydot, psidot, vdot):
+    def update(self, goal, psi, dt, X, Y, dx, dy, dpsi, speed):
         if goal.all() == None:
             return
         lr = self.lr
@@ -171,12 +177,12 @@ class PIDController():
         P_dist = 0.08
         I_dist = 0.06
         D_dist = 0.02
-        P_angle = 0.15
+        P_angle = 0.20
         I_angle = 0.08
         D_angle = 0.05
         scaling = 2e3 
 
-        #error_dist = V_desire - vdot
+        #error_dist = V_desire - speed
         #print(error_dist)
         #error_dist_cum = error_dist * dt + error_dist_cum
         #error_dist_diff = (error_dist - error_dist_prev) / dt
@@ -199,16 +205,18 @@ class PIDController():
 
 
         #The following formulas are used to compensate the shape of Earth
-        X_rel = np.cos(np.deg2rad(goal[0])) * np.sin(np.deg2rad(goal[1] - Y))
-        Y_rel = np.cos(np.deg2rad(X)) * np.sin(np.deg2rad(goal[0])) - np.sin(np.deg2rad(X)) * np.cos(np.deg2rad(goal[0])) * np.cos(np.deg2rad(goal[1] - Y))
+        goal_rad = np.deg2rad(goal)
+        X_rel = np.cos(goal_rad[0]) * np.sin(np.deg2rad(goal[1] - Y))
+        Y_rel = np.cos(np.deg2rad(X)) * np.sin(goal_rad[0]) - np.sin(np.deg2rad(X)) * np.cos(goal_rad[0]) * np.cos(np.deg2rad(goal[1] - Y))
         #print("first part: " + str(np.cos(np.deg2rad(goal[0]))))
         #print("second part: " + str(np.sin(np.deg2rad(goal[1] - Y))))
         #print(" X_rel " + str(X_rel) + " Y_rel " + str(Y_rel))
         angle_desire = np.arctan2(X_rel, Y_rel)
 
-        print("current pos:" + str(X) + " " + str(Y))
-        print("goal: " + str(goal[0]) + " " + str(goal[1]))
-        print("angle_desire: " + str(angle_desire) ) 
+        print(f"current pos:{X} {Y}")
+        print(f"goal: {goal[0]} {goal[1]}")
+        print(f"diff: {X_rel} {Y_rel}")
+        print(f"angle_desire: {np.rad2deg(angle_desire)}") 
         error_angle = wrapTopi(angle_desire - psi)
 
         error_angle_cum = error_angle * dt + error_angle_cum
@@ -217,8 +225,8 @@ class PIDController():
 
         delta = max(min((P_angle * error_angle + I_angle * error_angle_cum + D_angle * error_angle_diff), 1), -1) #limit the output between 1 and -1. This is the input into the controller
         
-        print("angle command: " + str(delta))
-        print("Throttle command: " + str(throttle))
+        print(f"angle command: {delta}")
+        print(f"Throttle command: {throttle}")
         return -delta,throttle #reverse the direction of the angle controller
 
 #currently, LQR controller is not used due to some tuning issues but the infrastructure is developed for the future use.
@@ -268,7 +276,7 @@ class LQRController():
         #dt time step
 
         #Lateral Controller
-        error_dist = V_desire - vdot
+        error_dist = V_desire - speed
         error_dist_cum = error_dist * dt + error_dist_cum
         error_dist_diff = (error_dist - error_dist_prev) / dt
         error_dist_prev = error_dist
@@ -282,7 +290,7 @@ class LQRController():
         e1_dot = (e1 - error1_prev) / dt
         e2 = wrapTopi(-angle_desire + psi)
         e2_dot = (e2 - error2_prev ) / dt
-        A = np.matrix([[0, 1, 0, 0], [0, -(4 * ca / (m * xdot)), (4 * ca / m), -(2 * ca * (lf - lr) / (m * xdot))], [0, 0, 0, 1], [0, -(2 * ca * (lf - lr) / (z * xdot)), (2 * ca * (lf - lr) / Z), -(2 * ca * (lf ** 2 + lr ** 2)) / (Z * xdot), 0]])
+        A = np.matrix([[0, 1, 0, 0], [0, -(4 * ca / (m * dx)), (4 * ca / m), -(2 * ca * (lf - lr) / (m * xdot))], [0, 0, 0, 1], [0, -(2 * ca * (lf - lr) / (z * xdot)), (2 * ca * (lf - lr) / Z), -(2 * ca * (lf ** 2 + lr ** 2)) / (Z * xdot), 0]])
         B = np.matrix([[0 , 0], [(2 * ca / m), 0], [0, 0], [(2 * ca * lf / Z), 0]])
         C = np.identity(4)
         D = 0 
@@ -304,4 +312,4 @@ class LQRController():
 
 
 if __name__ == '__main__':
-    gps_navigation()
+    GpsNavigation()

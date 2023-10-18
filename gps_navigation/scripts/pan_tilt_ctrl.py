@@ -11,8 +11,10 @@ from scipy.spatial.transform import Rotation as R
 from camera import HebiCamera
 
 import rospy
-from std_msgs.msg import Float64
+from std_msgs.msg import Float64, String
 from std_srvs.srv import Trigger
+from geometry_msgs.msg import Twist
+from gps_navigation.srv import SetString, SetStringRequest
 
 import typing
 if typing.TYPE_CHECKING:
@@ -108,7 +110,7 @@ class MastInputs:
     goto_pose: 'int|None'
     flood_light: float
 
-    def __init__(self, sliders: 'list[float]', goto_pose: 'int|None', flood: float):
+    def __init__(self, sliders: 'list[float]', goto_pose: 'str|None', flood: float):
         self.pan = sliders[0]
         self.tilt = sliders[1]
         self.goto_pose = goto_pose
@@ -119,7 +121,7 @@ class MastControl:
     PAN_SCALING = 0.5
     TILT_SCALING = -0.5
 
-    def __init__(self, camera_mast: HebiCameraMast, camera: HebiCamera, home_poses=[]):
+    def __init__(self, camera_mast: HebiCameraMast, camera: HebiCamera, home_poses={}):
         self.state = MastControlState.STARTUP
         self.mast = camera_mast
         self.camera = camera
@@ -150,10 +152,10 @@ class MastControl:
         if self.state is self.state.DISCONNECTED:
             self.transition_to(t_now, self.state.TELEOP)
 
-        #self.camera.spot_light = inputs.flood_light
+        self.camera.spot_light = inputs.flood_light
 
         if self.state is self.state.STARTUP:
-            self.transition_to(t_now, self.state.HOMING, 0)
+            self.transition_to(t_now, self.state.HOMING, 'drive')
 
         elif self.state is self.state.HOMING:
             if t_now > self.mast.trajectory.end_time:
@@ -183,13 +185,13 @@ class MastControl:
             self.current_pose = None
 
         elif new_state is self.state.HOMING:
-            idx = args[0]
-            if idx < 0 or idx >= len(self.home_poses):
-                print(f"There are only {len(self.home_poses)} poses stored, cannot go to pose {idx+1}")
+            pose_name = args[0]
+            if pose_name not in self.home_poses:
+                print(f"Cannot find pose {pose_name}")
             else:
-                print(f"Transitioning to Homing (Pose {idx})")
-                self.current_pose = idx
-                self.mast.set_position(t_now, 3.0, self.home_poses[idx])
+                print(f"Transitioning to Homing (Pose {pose_name})")
+                self.current_pose = pose_name
+                self.mast.set_position(t_now, 3.0, self.home_poses[pose_name])
 
         elif new_state is self.state.TELEOP:
             print("Transitioning to Manual Control")
@@ -198,46 +200,6 @@ class MastControl:
             print("Transitioning to Exit")
 
         self.state = new_state
-
-
-def setup_mobile_io(m: 'MobileIO'):
-    #m.set_button_label(1, 'view')
-    #m.set_button_mode(1, 0)
-    #m.set_button_label(2, 'light')
-    #m.set_button_mode(2, 1)
-
-    #m.set_axis_label(2, 'camera')
-    #m.set_axis_label(1, '')
-    #m.set_axis_label(4, '\U0001F4A1')
-
-    # Since this value is rescaled -1:1 -> 0:1, set to "0" position to start
-    #m.set_axis_value(4, -1.0)
-    pass
-
-
-def parse_mobile_feedback(m: 'MobileIO', current_pose):
-    if not m.update(0.0):
-        return None
-
-    # Update Camera light
-    #flood_light = 0.0
-    #if m.get_button_state(2):
-    #    flood_light = (m.get_axis_state(4) + 1.0) / 2.0
-
-    pan  = 0.0 #-1.0 * m.get_axis_state(1)
-    tilt = 0.0 #m.get_axis_state(2)
-
-    #goto_pose = None
-    #if m.get_button_diff(1) == 1:
-    #    if current_pose is None:
-    #        goto_pose = 0
-    #    else:
-    #        goto_pose = current_pose + 1
-
-    #if goto_pose:
-    #    goto_pose = goto_pose % 3
-
-    return MastInputs([pan, tilt], None, 0.0)
 
 
 if __name__ == "__main__":
@@ -274,48 +236,61 @@ if __name__ == "__main__":
         m = create_mobile_io(lookup, 'Chevron')
 
     m.update()
-    #setup_mobile_io(m)
     
-    pose_labels = ['front', 'rear', 'drive']
-    mast_control = MastControl(mast, camera, [[-0.7, 2.2], [0.55, 4.15], [0.0, 2.0]])
+    poses = {'front': [-0.7, 2.2], 'rear': [0.55, 4.15], 'drive': [0.0, 2.0]} 
+    mast_control = MastControl(mast, camera, poses)
 
+    light_level = 0.0
     def light_cb(msg):
-        mast_control.camera.spot_light = msg.data
+        global light_level
+        light_level = msg.data
 
     rospy.Subscriber('~light', Float64, light_cb)
 
-    def goto_cb(req):
+    pan_tilt_twist = Twist()
+    def move_cb(msg):
+        global pan_tilt_twist
+        pan_tilt_twist = msg
+
+    rospy.Subscriber('~pan_tilt_vel', Twist, move_cb)
+
+    view_pub = rospy.Publisher('~pose', String, queue_size=3, latch=True)
+    pose_str = String()
+    def publish_pose(evt):
+        global pose_str
+        if mast_control.current_pose is None:
+            pose_str.data = 'roam'
+        else:
+            pose_str.data = mast_control.current_pose
+        view_pub.publish(pose_str)
+    rospy.Timer(rospy.Duration.from_sec(1.0), publish_pose)
+
+    def goto_cb(req: SetStringRequest):
+        global pose_str
         if mast_control.state != mast_control.state.TELEOP:
             return [False, 'called too soon']
 
-        next_pose = 0
-        if mast_control.current_pose is not None:
-            next_pose = mast_control.current_pose + 1
-            next_pose = next_pose % 3
-        mast_control.transition_to(rospy.get_time(), mast_control.state.HOMING, next_pose)
-        return [True, pose_labels[next_pose]]
+        mast_control.transition_to(rospy.get_time(), mast_control.state.HOMING, req.text)
+        view_pub.publish(String(req.text))
 
-    rospy.Service('~goto_next', Trigger, goto_cb)
+        return [True, req.text]
+
+    rospy.Service('~goto_pose', SetString, goto_cb)
 
     #######################
     ## Main Control Loop ##
     #######################
-    
+
     cmd = hebi.GroupCommand(1)
     while mast_control.running and not rospy.is_shutdown():
         t = rospy.get_time()
-        inputs = parse_mobile_feedback(m, mast_control.current_pose)
-
-        # reset UI if we just reconnected in case tablet UI was restarted
-        #if inputs and mast_control.state == MastControlState.DISCONNECTED:
-        #    setup_mobile_io(m)
-
-        mast_control.update(t, inputs)
+        
+        pan = pan_tilt_twist.angular.z
+        tilt = pan_tilt_twist.angular.x
+        mast_control.update(t, MastInputs([pan, tilt], None, light_level))
 
         # Update mobileIO stream angle
-        if inputs:
-            #if inputs.goto_pose is not None:
-            #    m.set_button_label(1, pose_labels[inputs.goto_pose])
+        if m.update(0.0):
             # pi rad offset needed for wide angle cameras
             cmd.io.c.set_float(1, mast_control.camera.roll + np.pi)
             m._group.send_command(cmd)

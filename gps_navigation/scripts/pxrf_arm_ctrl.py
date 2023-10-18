@@ -28,7 +28,7 @@ def get_arm_output_xyz(arm, angles):
 
 
 if __name__ == '__main__':
-    rospy.init_node('probe_ctrl')
+    rospy.init_node('pxrf_arm_ctrl')
 
     lookup = hebi.Lookup()
     rospy.sleep(2)
@@ -36,7 +36,7 @@ if __name__ == '__main__':
     family = 'ScoopArm'
     names = ['J1_base', 'J2_shoulder', 'J3_elbow', 'J4_scoop']
     this_dir = os.path.dirname(__file__)
-    hrdf_file = os.path.join(this_dir, "Chevron-Probe-Arm.hrdf")
+    hrdf_file = os.path.join(this_dir, "Chevron-XRF-Arm.hrdf")
     gains_file = os.path.join(this_dir, "ChevronScoopArm-FullGains_STRATEGY4.xml")
 
     # Create Arm object
@@ -48,9 +48,9 @@ if __name__ == '__main__':
     probe_arm.load_gains(gains_file)
     probe_arm.update()
 
-    probe_stow = np.array([0, 2.8, 2.7, 0.0], dtype=np.float64)
-    probe_mid_stow = np.array([0, 2.2, 2.10, 0.0], dtype=np.float64)
-    probe_home = np.array([0, 0.7, 1.4, 2.25], dtype=np.float64)
+    probe_stow = np.array([0, 2.0, 2.75, -0.67], dtype=np.float64)
+    probe_mid_stow = np.array([0, 1.45, 2.0, -0.9], dtype=np.float64)
+    probe_home = np.array([0, 0.7, 1.4, -0.67], dtype=np.float64)
 
     # we have to get the xyz position of the frame used for IK (not end effector)
     probe_home_xyz = get_arm_output_xyz(probe_arm, probe_home)
@@ -100,7 +100,7 @@ if __name__ == '__main__':
         global probe_delta
         probe_delta = msg
 
-    rospy.Subscriber('probe_pose_delta', Point, probe_delta_cb)
+    rospy.Subscriber('pxrf_probe_pose_delta', Point, probe_delta_cb)
 
     prev_tool_theta = 0.0
     tool_theta = 0.0
@@ -177,13 +177,6 @@ if __name__ == '__main__':
                 target_joints = test_joints.copy()
                 probe_arm.pending_command.led.color = 'transparent'
 
-
-            # offset scoop angle based on gravity vector
-            #o = probe_arm.last_feedback[3].orientation
-            # reorder wxyz to xyzw
-            #o = [*o[1:], o[0]]
-            # get x axis vector in global frame
-            #x_l = R.from_quat(o).as_matrix()[:, 0]
             x_l = frames[5][:3, 0]
             # get angle from level
             theta = math.acos(x_l @ [0, 0, -1])

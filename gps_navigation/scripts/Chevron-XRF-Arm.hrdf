@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<robot version="1.3.0" description="Chevron Scoop Arm">
+  <actuator type="R8-16"/>
+  <bracket type="R8HeavyRightInside"/>
+  <actuator type="R8-16"/>
+  <link type="R8" extension="0.325" twist="pi"/>
+  <actuator type="R8-16"/>
+  <link type="R8" extension="0.325" twist="pi"/>
+  <actuator type="R8-9"/>
+  <bracket type="R8LightRight"/>
+
+  <!-- For custom end-effector parameters and formatting please visit: -->
+  <!-- https://github.com/HebiRobotics/hebi-hrdf/blob/master/FORMAT.md#end-effector -->
+  <end-effector />
+  
+</robot>
